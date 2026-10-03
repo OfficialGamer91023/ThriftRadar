@@ -14,6 +14,7 @@ from app.media_store import LocalDirStore
 from app.pipeline.models import ModelRegistry
 from app.security import BodySizeLimitMiddleware, DemoDenylist, LocalGuard, SecurityHeaders
 from app.settings import Settings
+from app.worker import LocalCtx, Worker, sweep_once
 
 log = logging.getLogger(__name__)
 
@@ -75,21 +76,33 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         raise
 
     models = ModelRegistry(settings.models_dir, settings.demo_mode)
+    media_store = None if settings.demo_mode else LocalDirStore(settings.media_dir)
+    # The demo media store (bundled seed + Postgres blobs) arrives in build step 13; no worker until then.
+    worker = Worker(LocalCtx(pool, settings, models, media_store)) if media_store is not None else None
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         if settings.load_models:
             models.load_async()
-        # Build step 8 adds: Worker.start(), sweep_once(); step 13: purge_demo_uploads().
+        if worker is not None:
+            try:
+                sweep_once(pool, settings)
+            except Exception:
+                log.exception("startup sweep failed")
+            worker.start()
+        # Step 13 adds purge_demo_uploads().
         yield
+        if worker is not None:
+            worker.stop()
         pool.close()
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     app.state.settings = settings
     app.state.pool = pool
     app.state.models = models
-    app.state.wake = lambda: None  # replaced by Worker.wake in build step 8
-    app.state.media_store = None if settings.demo_mode else LocalDirStore(settings.media_dir)
+    app.state.worker = worker
+    app.state.wake = worker.wake if worker is not None else (lambda: None)
+    app.state.media_store = media_store
 
     # Middleware: the last one added runs first. Order of checks: headers wrapper → guard → body limit.
     app.add_middleware(BodySizeLimitMiddleware, limits={

@@ -62,10 +62,13 @@ class Settings(BaseSettings):
     lease_vlm_s: int = 180
     max_local_attempts: int = 3
 
-    repost_window_days: int = 60
-    phash_max_dist: int = 6
+    repost_window_days: int = 90
+    phash_max_dist: int = 2  # calibrated 2026-10-03: d=2 15/15 same, d=4 4/15 (DESIGN §4.5)
     phash_xseller_max_dist: int = 2
-    repost_emb_min_cos: float = 0.95
+    repost_emb_min_cos: float = 0.96  # calibrated 2026-10-03 (DESIGN §4.5 find_repost_embedding)
+    siglip_brand_min_cos: float = 0.08  # calibrated 2026-10-03 (DESIGN §4.5 process_local step 11)
+    siglip_brand_margin: float = 0.03
+    ocr_max_images: int = 4
 
     notify_macos: bool = True
     trust_proxy_hops: int = 0

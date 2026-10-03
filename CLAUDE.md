@@ -31,6 +31,9 @@ cd backend && uv run python -m scripts.import_chat_export data/exports/<export> 
 cd backend && uv run --group bake python -m scripts.bake_models    # download + bake model weights into data/models (once)
 cd backend && uv run python -m scripts.bench_models                # model latency/RSS on 20 photos
 cd backend && uv run pytest -m "not models"                         # skip tests that load real weights
+cd backend && uv run python -m app.worker --drain [--vlm] [--limit N]   # process queued posts in the foreground (--vlm spends Featherless credits; caps apply)
+cd backend && uv run python -m scripts.requeue --vlm --source chat_export   # dry run: what sending finished posts to the VLM would cost; --yes applies
+cd backend && uv run python -m scripts.wishlist add "white sneakers size 42 under 5000"   # wishlists until the web app exists (also list / matches ID / remove ID / test-notify)
 ```
 
 Not set up yet: the listener (Node ≥ 20, `node:test`, `npm test` in `listener/`; `package.json` exists with an exact Baileys pin but deps aren't installed until build step 11). Tests needing real weights are marked `@pytest.mark.models` and skip if `data/models` hasn't been baked. `backend/.env` holds the real `INGEST_TOKEN` and `SENDER_HMAC_KEY`; never change `SENDER_HMAC_KEY` (stored sender/chat refs depend on it).

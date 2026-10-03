@@ -170,3 +170,12 @@ def test_us_womens_size_uses_the_womens_chart():
     assert (a["size_label"], a["size_eu"], a["size_approx"]) == ("US 9", Decimal("40.5"), True)  # UK 7
     a = item_attrs(parse_vlm_json(doc(item(size={"value": 9, "system": "US"}, gender="men"),)).items[0])
     assert a["size_eu"] == Decimal("42.5")  # UK 8.5
+
+
+@pytest.mark.parametrize("amount,currency,expect", [
+    (4500, "PKR", (4500, "PKR")), (4500, None, (4500, "PKR")), (4500, "INR", (4500, "PKR")),
+    (119, "EUR", (None, None)), (2, "USD", (None, None)), (300, "PKR", (None, None)), (13400, "JPY", (None, None)),
+])
+def test_vlm_price_guard(amount, currency, expect):
+    a = item_attrs(parse_vlm_json(doc(item(price={"amount": amount, "currency": currency}),)).items[0])
+    assert (a["price_amount"], a["currency"]) == expect

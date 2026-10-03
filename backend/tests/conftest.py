@@ -15,6 +15,7 @@ PG_BASE = os.environ.get("TEST_PG_BASE", "postgresql://thrift:thrift@127.0.0.1:5
 Settings.model_config["env_file"] = None
 for _key in ("FEATHERLESS_API_KEY", "OPENROUTER_API_KEY", "VLM_PROVIDER"):
     os.environ.pop(_key, None)
+os.environ["NOTIFY_MACOS"] = "0"  # no real macOS notifications from tests; MacNotifier tests inject `run`
 
 
 def _recreate(dbname: str) -> str:

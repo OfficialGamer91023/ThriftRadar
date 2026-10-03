@@ -21,7 +21,9 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
 from app import db
+from app.matching import match_listing
 from app.media_store import MediaMissing, MediaStore
+from app.notify import NullNotifier, notify_match
 from app.pipeline.budget import (
     DAILY_CAP,
     POST_CAP,
@@ -84,6 +86,7 @@ class LocalCtx:
     settings: Settings
     models: object  # ModelRegistry or a fake with detector / embedder / ocr / brand_text / brand_names
     store: MediaStore
+    notifier: object = None  # MacNotifier / NullNotifier; None means NullNotifier
 
 
 # ---------- claims and leases ----------
@@ -410,6 +413,7 @@ def _process_local(ctx: LocalCtx, post: PostRow) -> str:
     kinds = {p.kind for p in plans}
     outcome = kinds.pop() if len(kinds) == 1 else "mixed"
     listing_ids: list[int] = []
+    repost_targets: list[int] = []
     with db.tx(ctx.pool) as conn:
         for plan in plans:
             for img in plan.images:
@@ -421,6 +425,7 @@ def _process_local(ctx: LocalCtx, post: PostRow) -> str:
             if plan.kind == "repost":
                 apply_repost(conn, plan.hit, post_id=post.id, segment_idx=plan.seg.idx, seen_at=post.last_msg_at,
                              attrs=plan.attrs, sources=plan.sources)
+                repost_targets.append(plan.hit.listing_id)  # its price may have dropped: re-check wishlists
             elif plan.kind == "listed":
                 listing_ids.append(_upsert_listing(conn, post, plan, is_seed))
         n = conn.execute(
@@ -431,7 +436,9 @@ def _process_local(ctx: LocalCtx, post: PostRow) -> str:
         if n != 1:
             raise LostClaim(post.id)
 
-    # 13. Matching and notifications arrive in build step 10 (sweep_unmatched catches up).
+    # 13. Matching and notifications (best effort; sweep_unmatched catches up after a crash).
+    if status == "done":
+        match_and_notify(ctx.pool, ctx.notifier, listing_ids + repost_targets)
     ms = lambda x: int(x * 1000)
     log.info("local post_id=%s segs=%d repost=%d no_shoe=%d ocr_ran=%d decision=[%s] status=%s "
              "t_det=%d t_emb=%d t_ocr=%d total_ms=%d",
@@ -489,10 +496,51 @@ def sweep_exhausted(conn: psycopg.Connection, max_attempts: int) -> list[int]:
     return ids
 
 
-def sweep_once(pool: ConnectionPool, settings: Settings) -> None:
+def match_and_notify(pool: ConnectionPool, notifier, listing_ids: list[int]) -> list[int]:
+    """Match listings against wishlists and notify each new match. Never raises: matching is resumable."""
+    notifier = notifier or NullNotifier()
+    new: list[int] = []
+    try:
+        with db.tx(pool) as conn:
+            for lid in dict.fromkeys(listing_ids):
+                new += match_listing(conn, lid)
+        for mid in new:
+            with db.tx(pool) as conn:
+                notify_match(conn, notifier, mid)
+    except Exception:
+        log.exception("match_and_notify failed; sweep_unmatched / retry_unnotified will retry")
+    return new
+
+
+def sweep_unmatched(pool: ConnectionPool, notifier) -> int:
+    """Listings of recently finished posts that were never matched (a crash between commit and matching)."""
+    with db.tx(pool) as conn:
+        ids = [r[0] for r in conn.execute(
+            """SELECT l.id FROM listings l JOIN posts p ON p.id = l.post_id
+               WHERE l.match_checked_at IS NULL AND p.status = 'done'
+                 AND p.updated_at > now() - interval '1 hour'
+               ORDER BY l.id LIMIT 500""").fetchall()]
+    return len(match_and_notify(pool, notifier, ids)) if ids else 0
+
+
+def retry_unnotified(pool: ConnectionPool, notifier) -> int:
+    notifier = notifier or NullNotifier()
+    with db.tx(pool) as conn:
+        ids = [r[0] for r in conn.execute(
+            """SELECT id FROM matches WHERE notified_at IS NULL AND created_at < now() - interval '30 seconds'
+                 AND notify_attempts < 3 ORDER BY id LIMIT 50""").fetchall()]
+    for mid in ids:
+        with db.tx(pool) as conn:
+            notify_match(conn, notifier, mid)
+    return len(ids)
+
+
+def sweep_once(pool: ConnectionPool, settings: Settings, notifier=None) -> None:
     with db.tx(pool) as conn:
         sweep_stale_claims(conn)
         sweep_exhausted(conn, settings.max_local_attempts)
+    sweep_unmatched(pool, notifier)
+    retry_unnotified(pool, notifier)
 
 
 # ---------- the VLM stage ----------
@@ -511,6 +559,7 @@ class VlmCtx:
     backend: object  # OpenAICompatBackend / OllamaBackend / a fake with .name and .complete(req)
     breaker: CircuitBreaker
     limiter: RateLimiter
+    notifier: object = None
 
 
 def claim_vlm(conn: psycopg.Connection, lease_s: int) -> PostRow | None:
@@ -717,7 +766,9 @@ def _process_vlm(ctx: VlmCtx, post: PostRow) -> str:
             (status, next_at, reason, 1 if refund else 0, post.id, post.claim_token)).rowcount
         if n != 1:
             raise LostClaim(post.id)
-    # 4. Matching and notifications arrive in build step 10.
+    # 4. Matching and notifications.
+    if status == "done":
+        match_and_notify(ctx.pool, ctx.notifier, affected)
     log.info("vlm post_id=%s segs=%d resolved=%d status=%s reason=%s", post.id, len(listings),
              len(results), status, release[1] if release else "-")
     return status
@@ -836,7 +887,7 @@ class Worker:
     def _sweep_loop(self) -> None:
         while not self._stop.wait(SWEEP_INTERVAL_S):
             try:
-                sweep_once(self.ctx.pool, self.ctx.settings)
+                sweep_once(self.ctx.pool, self.ctx.settings, self.ctx.notifier)
             except Exception:
                 log.exception("sweep failed")
 
@@ -845,7 +896,7 @@ class Worker:
 
 def drain(ctx: LocalCtx, limit: int | None = None, progress_every: int = 50) -> Counter:
     s = ctx.settings
-    sweep_once(ctx.pool, s)
+    sweep_once(ctx.pool, s, ctx.notifier)
     done: Counter = Counter()
     t0 = time.monotonic()
     n = 0
@@ -900,13 +951,13 @@ def drain_vlm(ctx: VlmCtx, limit: int | None = None, progress_every: int = 50) -
     return done
 
 
-def make_vlm_ctx(pool: ConnectionPool, settings: Settings, store: MediaStore) -> VlmCtx | None:
+def make_vlm_ctx(pool: ConnectionPool, settings: Settings, store: MediaStore, notifier=None) -> VlmCtx | None:
     from app.pipeline.vlm import get_backend
 
     backend = get_backend(settings)
     if backend is None:
         return None
-    return VlmCtx(pool, settings, store, backend, CircuitBreaker(), RateLimiter(settings.vlm_rpm))
+    return VlmCtx(pool, settings, store, backend, CircuitBreaker(), RateLimiter(settings.vlm_rpm), notifier)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -938,10 +989,13 @@ def main(argv: list[str] | None = None) -> int:
         models = ModelRegistry(settings.models_dir, settings.demo_mode)
         if local_work:
             models.load()  # ~10–70 s; skipped when only the VLM stage has work
-        ctx = LocalCtx(pool, settings, models, LocalDirStore(settings.media_dir))
+        from app.notify import get_notifier
+
+        notifier = get_notifier(settings)
+        ctx = LocalCtx(pool, settings, models, LocalDirStore(settings.media_dir), notifier)
         done = drain(ctx, args.limit) if local_work else Counter()
         if args.vlm:
-            vctx = make_vlm_ctx(pool, settings, ctx.store)
+            vctx = make_vlm_ctx(pool, settings, ctx.store, notifier)
             if vctx is None:
                 print("VLM_PROVIDER is off; skipping the VLM stage", file=sys.stderr)
             else:

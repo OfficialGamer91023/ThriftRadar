@@ -72,6 +72,8 @@ class Settings(BaseSettings):
     ocr_max_images: int = 4
 
     notify_macos: bool = True
+    match_min_text: float = 0.08  # calibrated 2026-10-03 (DESIGN §4.6)
+    match_min_image: float = 0.80
     trust_proxy_hops: int = 0
     default_currency: str = ""
 

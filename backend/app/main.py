@@ -9,8 +9,9 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from app import db
-from app.api import health, ingest
+from app.api import health, ingest, posts, search, wishlists
 from app.media_store import LocalDirStore
+from app.notify import get_notifier
 from app.pipeline.models import ModelRegistry
 from app.security import BodySizeLimitMiddleware, DemoDenylist, LocalGuard, SecurityHeaders
 from app.settings import Settings
@@ -78,9 +79,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     models = ModelRegistry(settings.models_dir, settings.demo_mode)
     media_store = None if settings.demo_mode else LocalDirStore(settings.media_dir)
     # The demo media store (bundled seed + Postgres blobs) arrives in build step 13; no worker until then.
+    notifier = get_notifier(settings)
     worker = None
     if media_store is not None:
-        worker = Worker(LocalCtx(pool, settings, models, media_store), make_vlm_ctx(pool, settings, media_store))
+        worker = Worker(LocalCtx(pool, settings, models, media_store, notifier),
+                        make_vlm_ctx(pool, settings, media_store, notifier))
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -88,7 +91,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             models.load_async()
         if worker is not None:
             try:
-                sweep_once(pool, settings)
+                sweep_once(pool, settings, notifier)
             except Exception:
                 log.exception("startup sweep failed")
             worker.start()
@@ -103,6 +106,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.pool = pool
     app.state.models = models
     app.state.worker = worker
+    app.state.notifier = notifier
     app.state.wake = worker.wake if worker is not None else (lambda: None)
     app.state.media_store = media_store
 
@@ -119,8 +123,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.add_middleware(LocalGuard, ingest_token=settings.ingest_token)
     app.add_middleware(SecurityHeaders)
 
-    mounted = ["health"]
-    app.include_router(health.router)
+    mounted = ["health", "search", "wishlists", "posts"]
+    for r in (health.router, search.router, wishlists.router, posts.router):
+        app.include_router(r)
     if not settings.demo_mode:
         app.include_router(ingest.router)
         mounted.append("ingest")

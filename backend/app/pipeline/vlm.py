@@ -17,11 +17,15 @@ from app.pipeline.caption import _BRAND_RX, _first_match, normalize, to_size_eu
 
 log = logging.getLogger(__name__)
 
-PROMPT_VERSION = "v2"
+PROMPT_VERSION = "v3"
 MAX_CAPTION = 1000
 MAX_OCR_LINES = 20
 MAX_ITEMS = 6
 MIN_CONFIDENCE = 0.3
+# A VLM price is the seller's asking price only if it's in rupees (or has no currency) and plausible; anything else
+# was a retail tag in a photo (step 10 audit: 21 of 47 VLM prices were USD/GBP/EUR/JPY tags, many under 500).
+RUPEE = {None, "PKR", "INR", "RS", "RS.", "RUPEES", "RUPEE"}
+MIN_VLM_PRICE = 500
 PX_PER_TOKEN = 28 * 28  # Qwen2.5-VL; used only to floor under-reported image tokens
 
 SYSTEM = ("You extract shoe listing attributes from photos of a second-hand shoe sale post. "
@@ -29,7 +33,7 @@ SYSTEM = ("You extract shoe listing attributes from photos of a second-hand shoe
           "Output JSON matching the schema only. Use null for anything you cannot see or read; never guess a size "
           "or price that is not written somewhere. For size, copy it from a size tag or the seller's text: if several "
           "systems are shown, report EU, else UK, else US. For a US size, set gender to men or women when the tag "
-          "says so.")
+          "says so. Take the price only from the seller's text, never from a retail tag or label in a photo.")
 REPAIR = "Your previous answer was not valid JSON for the schema. Return only valid JSON for the schema."
 
 _NULLABLE_STR = {"type": ["string", "null"]}
@@ -322,6 +326,8 @@ def item_attrs(item: VlmItem) -> dict:
         attrs.update(size_label=f"{item.size.system} {label}", size_eu=size_eu, size_approx=approx)
     else:
         attrs.update(size_label=None, size_eu=None, size_approx=False)
-    if attrs["currency"]:
-        attrs["currency"] = attrs["currency"].upper()[:8]
+    cur = (attrs["currency"] or "").strip().upper() or None
+    if attrs["price_amount"] is not None and (cur not in RUPEE or attrs["price_amount"] < MIN_VLM_PRICE):
+        attrs["price_amount"], cur = None, None
+    attrs["currency"] = "PKR" if attrs["price_amount"] is not None else None
     return attrs

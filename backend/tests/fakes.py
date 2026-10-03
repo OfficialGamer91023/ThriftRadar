@@ -69,6 +69,9 @@ class FakeEmbedder:
             raise RuntimeError("embedder boom")
         return np.stack([unit(im.tobytes()) for im in imgs])
 
+    def embed_text(self, texts):
+        return np.stack([unit(t.lower().encode()) for t in texts])
+
 
 class FakeOcr:
     def __init__(self, lines_per_call=None):
@@ -90,6 +93,9 @@ class FakeModels:
         self.ocr = ocr or FakeOcr()
         self.brand_text = brand_text
         self.brand_names = list(brand_names)
+
+    def wait_ready(self, timeout: float = 60) -> bool:
+        return self.ready.is_set()
 
 
 def make_post(conn, store, key: str, seeds: list[int], *, text: str | None = None, caption: str | None = None,

@@ -1,0 +1,24 @@
+# secrets and session keys
+.env
+.env.*
+!.env.example
+listener/auth/
+listener/auth*/
+/auth/
+
+# real group data
+data/
+listener/spool/
+listener/state/
+
+# build output and deps
+listener/node_modules/
+web/node_modules/
+web/.next/
+web/out/
+backend/.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.pt
+.DS_Store

@@ -1,0 +1,44 @@
+[project]
+name = "thriftradar-backend"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "python-multipart>=0.0.9",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "psycopg[binary,pool]>=3.2",
+    "pgvector>=0.3",
+    "numpy>=1.26",
+    "pillow>=10.4",
+    "imagehash>=4.3",
+    "httpx>=0.27",
+    "torch>=2.14.1",
+    "torchvision>=0.29.1",
+    "ultralytics>=8.4.171",
+    "transformers>=5.18.0",
+    "sentencepiece>=0.2.2",
+    "protobuf>=7.36.2",
+    "rapidocr>=3.9.2",
+    "onnxruntime>=1.30.0",
+]
+
+[dependency-groups]
+bake = [
+    "clip",
+]
+dev = [
+    "pytest>=8",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+clip = { git = "https://github.com/ultralytics/CLIP.git", rev = "a13192f8cb767260d7dfd98c843b0716593169e7" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["models: needs real model weights (build step 7+)"]
+filterwarnings = ["ignore:Using `httpx` with `starlette.testclient` is deprecated"]

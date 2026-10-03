@@ -1,0 +1,14 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: thrift
+      POSTGRES_PASSWORD: thrift
+      POSTGRES_DB: thriftradar
+    ports:
+      - "127.0.0.1:5433:5432"   # localhost only; 5433 because Homebrew Postgres holds 5432
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+volumes:
+  pgdata:

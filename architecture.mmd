@@ -1,0 +1,91 @@
+%% ThriftRadar — local-first, privacy-preserving architecture
+%% Everything inside "User's Mac" runs on-device with open-source models.
+%% The Mac opens no inbound ports: WhatsApp is reached only via an outbound connection.
+
+flowchart LR
+
+    subgraph WA["WhatsApp · Meta servers"]
+        SELLERS["Thrift sellers<br/>post shoe photos + captions<br/>in a group chat"]
+    end
+
+    subgraph MAC["User's Mac — fully local, open-source models, no inbound ports"]
+
+        subgraph INGEST["Ingest · Node.js"]
+            BAILEYS["Baileys listener<br/>linked device<br/>outbound-only WebSocket"]
+            AUTH[("auth/ session keys<br/>never leave the Mac")]
+            FILTER{"From the<br/>thrift group?"}
+            DROP["Discarded<br/>never stored"]
+            ALBUM["Album grouper<br/>photos + caption from<br/>same sender within 60s"]
+        end
+
+        WEB["Web app · Next.js on localhost<br/>wishlist: text or reference photo<br/>live feed · matches · simulate post"]
+
+        API["Backend · FastAPI<br/>/ingest · /wishlist · /matches"]
+        QUEUE[["Job queue"]]
+
+        subgraph AI["AI pipeline · open-source models"]
+            DET["Shoe detection<br/>Grounding DINO / YOLO-World<br/>one crop per pair"]
+            OCR["Size-tag OCR<br/>PaddleOCR"]
+            VLM["Attribute extraction<br/>Qwen2.5-VL 7B via Ollama<br/>brand · model · colour<br/>size · condition · price"]
+            EMB["Visual embeddings<br/>SigLIP on Apple GPU"]
+        end
+
+        subgraph DATA["Storage"]
+            MEDIA[("Local media folder<br/>photos + crops")]
+            PG[("PostgreSQL + pgvector<br/>listings · embeddings<br/>wishlist · matches")]
+        end
+
+        subgraph MATCH["Matching engine"]
+            HARD["Hard filters<br/>size · max price · brand"]
+            SIM["Visual similarity<br/>cosine vs wishlist vectors"]
+            SCORE{"Score above<br/>threshold?"}
+        end
+
+        NOTIFY["Notifier<br/>macOS notification, fully offline"]
+    end
+
+    subgraph OUT["Optional · mobile alerts"]
+        TGAPI["Telegram Bot API"]
+        PHONE["User's phone"]
+    end
+
+    SELLERS -- "end-to-end encrypted" --> BAILEYS
+    BAILEYS <--> AUTH
+    BAILEYS --> FILTER
+    FILTER -- "No" --> DROP
+    FILTER -- "Yes" --> ALBUM
+    ALBUM --> API
+    WEB <--> API
+
+    API --> MEDIA
+    API --> QUEUE
+    API -- "wishlist text / photo" --> EMB
+    QUEUE --> DET
+    DET --> OCR
+    DET --> VLM
+    DET --> EMB
+    OCR -- "tag text" --> VLM
+    VLM -- "structured JSON" --> PG
+    EMB -- "vectors" --> PG
+
+    PG --> HARD
+    HARD --> SIM
+    SIM --> SCORE
+    SCORE -- "Yes" --> NOTIFY
+    SCORE -. "saved as match, shown in web app" .-> PG
+
+    NOTIFY -. "match details only" .-> TGAPI
+    TGAPI -.-> PHONE
+
+    classDef model fill:#ede7f6,stroke:#5e35b1,color:#1a1a1a
+    classDef store fill:#e3f2fd,stroke:#1565c0,color:#1a1a1a
+    classDef private fill:#fff3e0,stroke:#e65100,color:#1a1a1a
+    classDef drop fill:#ffebee,stroke:#c62828,color:#1a1a1a
+    class DET,OCR,VLM,EMB model
+    class MEDIA,PG,QUEUE store
+    class AUTH private
+    class DROP drop
+
+    style MAC fill:#f1f8e9,stroke:#2e7d32,stroke-width:3px
+    style WA fill:#fafafa,stroke:#9e9e9e,stroke-dasharray: 5 5
+    style OUT fill:#fafafa,stroke:#9e9e9e,stroke-dasharray: 5 5

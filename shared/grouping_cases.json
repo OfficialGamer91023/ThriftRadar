@@ -1,0 +1,1217 @@
+{
+  "version": 1,
+  "defaults": {
+    "idle_s": 60,
+    "max_span_s": 180,
+    "max_images": 30,
+    "max_bytes": 62914560
+  },
+  "cases": [
+    {
+      "name": "single_photo_with_caption",
+      "note": "One photo, caption on it.",
+      "resolution": "second",
+      "messages": [
+        {
+          "key": "a1",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 0,
+          "kind": "image",
+          "bytes": 200000,
+          "caption": "Nike size 42 Rs 4500"
+        }
+      ],
+      "expected": [
+        [
+          "a1"
+        ]
+      ]
+    },
+    {
+      "name": "album_burst",
+      "note": "Three photos sent as an album, seconds apart.",
+      "resolution": "second",
+      "messages": [
+        {
+          "key": "a1",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 0,
+          "kind": "image",
+          "bytes": 200000,
+          "caption": "Adidas samba"
+        },
+        {
+          "key": "a2",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 1,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a3",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 2,
+          "kind": "image",
+          "bytes": 200000
+        }
+      ],
+      "expected": [
+        [
+          "a1",
+          "a2",
+          "a3"
+        ]
+      ]
+    },
+    {
+      "name": "slow_upload_10_photos_90s",
+      "note": "Bad connection: 10 photos 10 s apart (90 s total). Sliding window keeps them together; a fixed 60 s window would split.",
+      "resolution": "second",
+      "messages": [
+        {
+          "key": "a0",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 0,
+          "kind": "image",
+          "bytes": 200000,
+          "caption": "Jordan 1 size 43"
+        },
+        {
+          "key": "a1",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 10,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a2",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 20,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a3",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 30,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a4",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 40,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a5",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 50,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a6",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 60,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a7",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 70,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a8",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 80,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a9",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 90,
+          "kind": "image",
+          "bytes": 200000
+        }
+      ],
+      "expected": [
+        [
+          "a0",
+          "a1",
+          "a2",
+          "a3",
+          "a4",
+          "a5",
+          "a6",
+          "a7",
+          "a8",
+          "a9"
+        ]
+      ]
+    },
+    {
+      "name": "cap_splits_200s_burst",
+      "note": "Photo every 20 s for 200 s: the 180 s cap closes the group; the 200 s photo starts a new one.",
+      "resolution": "second",
+      "messages": [
+        {
+          "key": "a0",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 0,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a1",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 20,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a2",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 40,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a3",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 60,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a4",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 80,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a5",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 100,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a6",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 120,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a7",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 140,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a8",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 160,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a9",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 180,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a10",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 200,
+          "kind": "image",
+          "bytes": 200000
+        }
+      ],
+      "expected": [
+        [
+          "a0",
+          "a1",
+          "a2",
+          "a3",
+          "a4",
+          "a5",
+          "a6",
+          "a7",
+          "a8",
+          "a9"
+        ],
+        [
+          "a10"
+        ]
+      ]
+    },
+    {
+      "name": "idle_gap_61s_splits",
+      "note": "61 s silence ends the group.",
+      "resolution": "second",
+      "messages": [
+        {
+          "key": "a1",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 0,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a2",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 61,
+          "kind": "image",
+          "bytes": 200000
+        }
+      ],
+      "expected": [
+        [
+          "a1"
+        ],
+        [
+          "a2"
+        ]
+      ]
+    },
+    {
+      "name": "idle_gap_exactly_60s_joins",
+      "note": "Δ ≤ 60 s joins (inclusive).",
+      "resolution": "second",
+      "messages": [
+        {
+          "key": "a1",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 0,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a2",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 60,
+          "kind": "image",
+          "bytes": 200000
+        }
+      ],
+      "expected": [
+        [
+          "a1",
+          "a2"
+        ]
+      ]
+    },
+    {
+      "name": "interleaved_senders",
+      "note": "Two sellers post at the same time; grouping is per (chat, sender).",
+      "resolution": "second",
+      "messages": [
+        {
+          "key": "a1",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 0,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "b1",
+          "chat": "g1",
+          "sender": "s2",
+          "ts": 1,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a2",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 2,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "b2",
+          "chat": "g1",
+          "sender": "s2",
+          "ts": 3,
+          "kind": "image",
+          "bytes": 200000
+        }
+      ],
+      "expected": [
+        [
+          "a1",
+          "a2"
+        ],
+        [
+          "b1",
+          "b2"
+        ]
+      ]
+    },
+    {
+      "name": "same_sender_two_chats",
+      "note": "Same sender in two chats: separate groups (the listener only processes one chat, the importer one export).",
+      "resolution": "second",
+      "messages": [
+        {
+          "key": "a1",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 0,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "b1",
+          "chat": "g2",
+          "sender": "s1",
+          "ts": 1,
+          "kind": "image",
+          "bytes": 200000
+        }
+      ],
+      "expected": [
+        [
+          "a1"
+        ],
+        [
+          "b1"
+        ]
+      ]
+    },
+    {
+      "name": "caption_text_before_photos",
+      "note": "Seller sends the caption as text, then photos, within the window: one group.",
+      "resolution": "second",
+      "messages": [
+        {
+          "key": "t1",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 0,
+          "kind": "text",
+          "caption": "Nike AF1 size 42 Rs 4500"
+        },
+        {
+          "key": "a1",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 10,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a2",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 12,
+          "kind": "image",
+          "bytes": 200000
+        }
+      ],
+      "expected": [
+        [
+          "t1",
+          "a1",
+          "a2"
+        ]
+      ]
+    },
+    {
+      "name": "text_after_photos",
+      "note": "A follow-up text from the seller inside the window joins the group.",
+      "resolution": "second",
+      "messages": [
+        {
+          "key": "a1",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 0,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a2",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 1,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "t1",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 30,
+          "kind": "text",
+          "caption": "price 4000 final"
+        }
+      ],
+      "expected": [
+        [
+          "a1",
+          "a2",
+          "t1"
+        ]
+      ]
+    },
+    {
+      "name": "text_extends_window",
+      "note": "Text resets lastTs too: photo at 0, text at 50, photo at 100 → one group.",
+      "resolution": "second",
+      "messages": [
+        {
+          "key": "a1",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 0,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "t1",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 50,
+          "kind": "text",
+          "caption": "text"
+        },
+        {
+          "key": "a2",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 100,
+          "kind": "image",
+          "bytes": 200000
+        }
+      ],
+      "expected": [
+        [
+          "a1",
+          "t1",
+          "a2"
+        ]
+      ]
+    },
+    {
+      "name": "text_only_dropped",
+      "note": "Text with no photos is buyer chatter: dropped.",
+      "resolution": "second",
+      "messages": [
+        {
+          "key": "t1",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 0,
+          "kind": "text",
+          "caption": "is this available?"
+        },
+        {
+          "key": "t2",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 5,
+          "kind": "text",
+          "caption": "text"
+        }
+      ],
+      "expected": []
+    },
+    {
+      "name": "late_text_alone_dropped",
+      "note": "Text 5 minutes after the photos is its own text-only group: dropped.",
+      "resolution": "second",
+      "messages": [
+        {
+          "key": "a1",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 0,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "t1",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 300,
+          "kind": "text",
+          "caption": "text"
+        }
+      ],
+      "expected": [
+        [
+          "a1"
+        ]
+      ]
+    },
+    {
+      "name": "all_missing_dropped",
+      "note": "Every photo failed to download: dropped.",
+      "resolution": "second",
+      "messages": [
+        {
+          "key": "a1",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 0,
+          "kind": "image",
+          "bytes": 200000,
+          "missing": true
+        },
+        {
+          "key": "a2",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 1,
+          "kind": "image",
+          "bytes": 200000,
+          "missing": true
+        }
+      ],
+      "expected": []
+    },
+    {
+      "name": "partially_missing_kept",
+      "note": "One good photo is enough; the missing one stays in the group.",
+      "resolution": "second",
+      "messages": [
+        {
+          "key": "a1",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 0,
+          "kind": "image",
+          "bytes": 200000,
+          "missing": true
+        },
+        {
+          "key": "a2",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 1,
+          "kind": "image",
+          "bytes": 200000
+        }
+      ],
+      "expected": [
+        [
+          "a1",
+          "a2"
+        ]
+      ]
+    },
+    {
+      "name": "image_cap_31st_splits",
+      "note": "31 photos in a burst: 30 + 1.",
+      "resolution": "second",
+      "messages": [
+        {
+          "key": "a00",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 0,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a01",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 1,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a02",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 2,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a03",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 3,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a04",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 4,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a05",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 5,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a06",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 6,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a07",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 7,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a08",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 8,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a09",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 9,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a10",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 10,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a11",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 11,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a12",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 12,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a13",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 13,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a14",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 14,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a15",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 15,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a16",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 16,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a17",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 17,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a18",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 18,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a19",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 19,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a20",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 20,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a21",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 21,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a22",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 22,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a23",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 23,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a24",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 24,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a25",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 25,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a26",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 26,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a27",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 27,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a28",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 28,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a29",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 29,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a30",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 30,
+          "kind": "image",
+          "bytes": 200000
+        }
+      ],
+      "expected": [
+        [
+          "a00",
+          "a01",
+          "a02",
+          "a03",
+          "a04",
+          "a05",
+          "a06",
+          "a07",
+          "a08",
+          "a09",
+          "a10",
+          "a11",
+          "a12",
+          "a13",
+          "a14",
+          "a15",
+          "a16",
+          "a17",
+          "a18",
+          "a19",
+          "a20",
+          "a21",
+          "a22",
+          "a23",
+          "a24",
+          "a25",
+          "a26",
+          "a27",
+          "a28",
+          "a29"
+        ],
+        [
+          "a30"
+        ]
+      ]
+    },
+    {
+      "name": "byte_cap_splits",
+      "note": "3 × 25 MB: the third would exceed 60 MB.",
+      "resolution": "second",
+      "messages": [
+        {
+          "key": "a1",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 0,
+          "kind": "image",
+          "bytes": 26214400
+        },
+        {
+          "key": "a2",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 1,
+          "kind": "image",
+          "bytes": 26214400
+        },
+        {
+          "key": "a3",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 2,
+          "kind": "image",
+          "bytes": 26214400
+        }
+      ],
+      "expected": [
+        [
+          "a1",
+          "a2"
+        ],
+        [
+          "a3"
+        ]
+      ]
+    },
+    {
+      "name": "duplicate_key_ignored",
+      "note": "The same message delivered twice joins once.",
+      "resolution": "second",
+      "messages": [
+        {
+          "key": "a1",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 0,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a1",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 0,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a2",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 1,
+          "kind": "image",
+          "bytes": 200000
+        }
+      ],
+      "expected": [
+        [
+          "a1",
+          "a2"
+        ]
+      ]
+    },
+    {
+      "name": "order_by_first_message",
+      "note": "Groups are emitted in order of their first message, not of closing.",
+      "resolution": "second",
+      "messages": [
+        {
+          "key": "a1",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 0,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "b1",
+          "chat": "g1",
+          "sender": "s2",
+          "ts": 5,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a2",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 50,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a3",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 100,
+          "kind": "image",
+          "bytes": 200000
+        }
+      ],
+      "expected": [
+        [
+          "a1",
+          "a2",
+          "a3"
+        ],
+        [
+          "b1"
+        ]
+      ]
+    },
+    {
+      "name": "same_seller_two_items_one_window",
+      "note": "Two items with their own captions within 60 s: one group; segment_post splits them later.",
+      "resolution": "second",
+      "messages": [
+        {
+          "key": "a1",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 0,
+          "kind": "image",
+          "bytes": 200000,
+          "caption": "Nike size 42"
+        },
+        {
+          "key": "a2",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 2,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a3",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 20,
+          "kind": "image",
+          "bytes": 200000,
+          "caption": "Vans size 40"
+        },
+        {
+          "key": "a4",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 21,
+          "kind": "image",
+          "bytes": 200000
+        }
+      ],
+      "expected": [
+        [
+          "a1",
+          "a2",
+          "a3",
+          "a4"
+        ]
+      ]
+    },
+    {
+      "name": "minute_resolution_adjacent_minutes_merge",
+      "note": "Android export: 12:00 and 12:01 are ≤ 60 s apart on floored minutes, so they merge even though the real gap may be up to 119 s. Deliberate bias toward merging.",
+      "resolution": "minute",
+      "messages": [
+        {
+          "key": "a1",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 0,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a2",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 60,
+          "kind": "image",
+          "bytes": 200000
+        }
+      ],
+      "expected": [
+        [
+          "a1",
+          "a2"
+        ]
+      ]
+    },
+    {
+      "name": "minute_resolution_two_minutes_split",
+      "note": "12:00 and 12:02 split.",
+      "resolution": "minute",
+      "messages": [
+        {
+          "key": "a1",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 0,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a2",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 120,
+          "kind": "image",
+          "bytes": 200000
+        }
+      ],
+      "expected": [
+        [
+          "a1"
+        ],
+        [
+          "a2"
+        ]
+      ]
+    },
+    {
+      "name": "params_override",
+      "note": "Fixtures can override defaults (used to test small caps).",
+      "resolution": "second",
+      "messages": [
+        {
+          "key": "a1",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 0,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a2",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 1,
+          "kind": "image",
+          "bytes": 200000
+        },
+        {
+          "key": "a3",
+          "chat": "g1",
+          "sender": "s1",
+          "ts": 2,
+          "kind": "image",
+          "bytes": 200000
+        }
+      ],
+      "expected": [
+        [
+          "a1",
+          "a2"
+        ],
+        [
+          "a3"
+        ]
+      ],
+      "params": {
+        "max_images": 2
+      }
+    }
+  ]
+}

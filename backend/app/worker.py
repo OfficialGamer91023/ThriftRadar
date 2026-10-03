@@ -1,6 +1,6 @@
 """The in-process worker: claims, leases, the local stage and the sweeper. Spec: DESIGN.md §4.5.
 
-CLI: python -m app.worker --drain [--limit N]   (local stage only, in the foreground)
+CLI: python -m app.worker --drain [--vlm] [--limit N]   (in the foreground; --vlm also runs the VLM stage)
 """
 
 import argparse
@@ -12,7 +12,7 @@ import time
 import uuid
 from collections import Counter
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 
 import numpy as np
 import psycopg
@@ -22,13 +22,37 @@ from psycopg_pool import ConnectionPool
 
 from app import db
 from app.media_store import MediaMissing, MediaStore
+from app.pipeline.budget import (
+    DAILY_CAP,
+    POST_CAP,
+    CircuitBreaker,
+    RateLimiter,
+    budget_available,
+    cached_response,
+    estimate_cost,
+    finish_vlm_call,
+    next_utc_midnight,
+    reserve_vlm_call,
+)
 from app.pipeline.caption import CaptionFields, parse_caption, to_size_eu
 from app.pipeline.decide import Decision, SegFlags, needs_vlm
 from app.pipeline.detect import Det, primary_box
 from app.pipeline.embed import segment_embedding
+from app.pipeline.merge import merge_attributes
 from app.pipeline.ocr import MIN_CONF, parse_size_tag
 from app.pipeline.repost import RepostHit, apply_repost, find_repost_embedding, find_repost_phash, knn_brand
 from app.pipeline.segment import Segment, SegMsg, segment_post
+from app.pipeline.vlm import (
+    PROMPT_VERSION,
+    BadJson,
+    Crop,
+    SegCtx,
+    VlmOutput,
+    build_request,
+    image_token_floor,
+    item_attrs,
+    parse_vlm_json,
+)
 from app.settings import Settings
 
 log = logging.getLogger(__name__)
@@ -427,7 +451,7 @@ def _upsert_listing(conn: psycopg.Connection, post: PostRow, plan: SegPlan, is_s
         "size_approx": bool(a.get("size_approx")), "price_amount": a.get("price_amount"),
         "currency": a.get("currency"), "price_on_request": bool(a.get("price_on_request")),
         "attr_sources": Jsonb(plan.sources), "extraction": "seed" if is_seed else "local",
-        "vlm_missing": (plan.decision.missing or None) if plan.decision.needed else None,
+        "vlm_missing": plan.decision.missing if plan.decision.needed else None,  # [] = multi_item only
         "cover_image_id": plan.cover_id, "embedding": plan.seg_emb,
         "first_seen_at": post.last_msg_at, "last_seen_at": post.last_msg_at,
     }
@@ -471,11 +495,281 @@ def sweep_once(pool: ConnectionPool, settings: Settings) -> None:
         sweep_exhausted(conn, settings.max_local_attempts)
 
 
+# ---------- the VLM stage ----------
+
+LISTING_ATTRS = ("brand", "model", "colour", "condition", "gender", "size_label", "size_eu", "size_approx",
+                 "price_amount", "currency", "price_on_request")
+BACKOFF_S = (30, 120, 600)
+FAILED = object()  # a segment that ends as vlm_failed
+
+
+@dataclass(frozen=True)
+class VlmCtx:
+    pool: ConnectionPool
+    settings: Settings
+    store: MediaStore
+    backend: object  # OpenAICompatBackend / OllamaBackend / a fake with .name and .complete(req)
+    breaker: CircuitBreaker
+    limiter: RateLimiter
+
+
+def claim_vlm(conn: psycopg.Connection, lease_s: int) -> PostRow | None:
+    row = conn.execute(
+        """UPDATE posts SET status = 'processing', stage = 'vlm', claim_token = %s, claimed_at = now(),
+                  lease_expires_at = now() + make_interval(secs => %s), vlm_attempts = vlm_attempts + 1
+           WHERE id = (SELECT id FROM posts
+                       WHERE status = 'awaiting_vlm' AND next_attempt_at <= now()
+                       ORDER BY priority, created_at
+                       FOR UPDATE SKIP LOCKED LIMIT 1)
+           RETURNING id, source, sender_ref, owner_session, first_msg_at, last_msg_at, vlm_policy, seed_attrs,
+                     claim_token, vlm_attempts""",
+        (uuid.uuid4(), lease_s),
+    ).fetchone()
+    return PostRow(*row) if row else None
+
+
+def _backoff(attempt: int, retry_after: float | None = None) -> timedelta:
+    base = BACKOFF_S[min(max(attempt, 1), len(BACKOFF_S)) - 1]
+    return timedelta(seconds=max(base, retry_after or 0))
+
+
+def _vlm_crops(ctx: VlmCtx, images: list[dict], need_size: bool) -> list[Crop]:
+    """Shoe crops first, most confident detection first; when the size is missing, fill the remaining slots with
+    photos that had no shoe box (often a close-up of the size tag)."""
+    s = ctx.settings
+    boxed = sorted((i for i in images if i["primary_box"]),
+                   key=lambda i: (-max((d["conf"] for d in i["detections"] or []), default=0), i["seq"]))
+    unboxed = sorted((i for i in images if not i["primary_box"]), key=lambda i: i["seq"])
+    chosen = boxed[:s.vlm_max_images]
+    if need_size or not chosen:
+        chosen += unboxed[:s.vlm_max_images - len(chosen)]
+    crops = []
+    for img in chosen:
+        try:
+            pil = _open(ctx.store.get(img["sha256"]))
+        except MediaMissing:
+            continue
+        if img["primary_box"]:
+            pil = pil.crop(tuple(img["primary_box"]))
+        pil.thumbnail((s.vlm_max_side_px, s.vlm_max_side_px))
+        buf = io.BytesIO()
+        pil.save(buf, format="JPEG", quality=85)
+        crops.append(Crop(buf.getvalue(), pil.width, pil.height))
+    return crops
+
+
+def _load_vlm(ctx: VlmCtx, post: PostRow):
+    with db.tx(ctx.pool) as conn:
+        cols = ", ".join(LISTING_ATTRS)
+        rows = conn.execute(
+            f"""SELECT id, segment_idx, attr_sources, vlm_missing, embedding, cover_image_id, {cols}
+                FROM listings WHERE post_id = %s AND item_idx = 0 AND extraction = 'local'
+                  AND vlm_missing IS NOT NULL ORDER BY segment_idx""", (post.id,)).fetchall()
+        msgs = conn.execute(
+            "SELECT seq, kind, caption, image_id FROM post_messages WHERE post_id = %s ORDER BY seq",
+            (post.id,)).fetchall()
+        imgs = conn.execute(
+            """SELECT id, seq, sha256, segment_idx, primary_box, detections, ocr_text FROM images
+               WHERE post_id = %s ORDER BY seq""", (post.id,)).fetchall()
+    listings = []
+    for r in rows:
+        listings.append({"id": r[0], "segment_idx": r[1], "sources": dict(r[2]), "missing": list(r[3]),
+                         "embedding": r[4], "cover_image_id": r[5], "attrs": dict(zip(LISTING_ATTRS, r[6:]))})
+    segments, extra = segment_post([SegMsg(seq, kind, caption, image_id) for seq, kind, caption, image_id in msgs])
+    images = [{"id": i[0], "seq": i[1], "sha256": bytes(i[2]), "segment_idx": i[3], "primary_box": i[4],
+               "detections": i[5], "ocr_text": i[6]} for i in imgs]
+    return listings, {sg.idx: sg for sg in segments}, extra, images
+
+
+def process_vlm(ctx: VlmCtx, post: PostRow) -> str | None:
+    """The VLM stage for one claimed post. Returns the final status, or None if the claim was lost."""
+    try:
+        return _process_vlm(ctx, post)
+    except LostClaim:
+        log.warning("lost_claim stage=vlm post_id=%s", post.id)
+        return None
+    except Exception as e:
+        log.exception("vlm post_id=%s error=%s", post.id, type(e).__name__)
+        try:
+            with db.tx(ctx.pool) as conn:
+                conn.execute(
+                    """UPDATE posts SET status = 'awaiting_vlm', claim_token = NULL, lease_expires_at = NULL,
+                              last_error = %s, next_attempt_at = %s
+                       WHERE id = %s AND claim_token = %s AND status = 'processing'""",
+                    (type(e).__name__[:500], datetime.now(UTC) + _backoff(post.attempts),
+                     post.id, post.claim_token))
+        except Exception:
+            log.exception("vlm post_id=%s could not record error; the sweeper will reclaim it", post.id)
+        return "awaiting_vlm"
+
+
+def _process_vlm(ctx: VlmCtx, post: PostRow) -> str:
+    s = ctx.settings
+    provider, model = ctx.backend.name, s.vlm_model
+    listings, segments, extra, images = _load_vlm(ctx, post)
+    results: dict[int, object] = {}  # segment_idx -> VlmOutput | FAILED
+    release: tuple[datetime, str, bool] | None = None  # (next_attempt_at, reason, refund the claim's attempt)
+
+    for lst in listings:
+        seg_idx = lst["segment_idx"]
+        # 2a. Response cache: a paid answer is never paid for twice.
+        with db.tx(ctx.pool) as conn:
+            cached = cached_response(conn, post.id, seg_idx, PROMPT_VERSION)
+        if cached is not None:
+            results[seg_idx] = VlmOutput.model_validate(cached)
+            log.info("vlm post_id=%s seg=%s cached=1", post.id, seg_idx)
+            continue
+
+        seg_images = [i for i in images if i["segment_idx"] == seg_idx]
+        need_size = "size" in lst["missing"] or not lst["attrs"].get("size_label")
+        seg = segments.get(seg_idx)
+        caption = "\n".join(t for t in ((seg.caption if seg else None), extra) if t) or None
+        ocr = [ln for i in seg_images if i["ocr_text"] for ln in i["ocr_text"].splitlines()]
+        known = {k: (str(v) if not isinstance(v, (int, float, bool, str)) else v)
+                 for k, v in lst["attrs"].items() if v not in (None, False) and k != "size_eu"}
+        repair = False
+        crops: list[Crop] | None = None
+        while True:
+            if not ctx.breaker.allow():
+                release = (ctx.breaker.reopen_at(), "breaker_open", True)
+                break
+            extend_lease(ctx.pool, post, s.lease_vlm_s)  # a worker that lost the post reserves nothing
+            with db.get_conn(ctx.pool) as conn:
+                call = reserve_vlm_call(conn, post_id=post.id, segment_idx=seg_idx, prompt_version=PROMPT_VERSION,
+                                        provider=provider, model=model, daily_cap=s.vlm_daily_cap,
+                                        max_attempts=s.vlm_max_attempts)
+            if call == DAILY_CAP:
+                release = (next_utc_midnight(), "daily_cap", True)
+                break
+            if call == POST_CAP:
+                results[seg_idx] = FAILED
+                break
+            if crops is None:
+                crops = _vlm_crops(ctx, seg_images, need_size)
+            seg_ctx = SegCtx(crops, caption, ocr, known, lst["missing"])
+            req = build_request(seg_ctx, model, repair=repair)
+            ctx.limiter.acquire()
+            res = ctx.backend.complete(req)
+            out, status, excerpt = None, res.status, None
+            if res.status == "ok":
+                try:
+                    out = parse_vlm_json(res.text)
+                except BadJson as e:
+                    status, excerpt = "bad_json", e.excerpt
+            cost = res.provider_cost if res.provider_cost is not None else estimate_cost(
+                res.input_tokens, res.output_tokens, floor_input=image_token_floor(seg_ctx),
+                price_in_per_m=s.vlm_price_in_per_m, price_out_per_m=s.vlm_price_out_per_m)
+            with db.get_conn(ctx.pool) as conn:
+                finish_vlm_call(conn, call, status=status, http_status=res.http_status,
+                                input_tokens=res.input_tokens, output_tokens=res.output_tokens,
+                                cost_usd=cost if res.status == "ok" or res.status == "timeout" else 0,
+                                latency_ms=res.latency_ms, response=out.model_dump() if out else None,
+                                raw_excerpt=excerpt)
+            log.info("vlm post_id=%s seg=%s call=%s status=%s http=%s ms=%s in_tok=%s out_tok=%s cost_usd=%s",
+                     post.id, seg_idx, call, status, res.http_status, res.latency_ms, res.input_tokens,
+                     res.output_tokens, cost)
+            code = res.http_status
+            if res.status == "http_error" and code in (401, 402, 403):
+                ctx.breaker.open(900, reason=f"http_{code}")
+                release = (ctx.breaker.reopen_at(), f"http_{code}", True)
+                break
+            ctx.breaker.success()
+            if out is not None:
+                results[seg_idx] = out
+                break
+            if status == "bad_json":
+                if repair:
+                    results[seg_idx] = FAILED
+                    break
+                repair = True
+                continue
+            if res.status == "http_error" and code == 400:
+                log.error("vlm post_id=%s seg=%s http 400: request rejected (our bug)", post.id, seg_idx)
+                results[seg_idx] = FAILED
+                break
+            # transient: timeout, network error, 429, 5xx
+            delay = _backoff(post.attempts, res.retry_after if res.status == "http_error" else None)
+            release = (datetime.now(UTC) + delay, f"{res.status}:{code or '-'}", False)
+            break
+        if release:
+            break
+
+    # 3. One transaction, conditional on the claim.
+    affected: list[int] = []
+    with db.tx(ctx.pool) as conn:
+        for lst in listings:
+            r = results.get(lst["segment_idx"])
+            if r is None:
+                continue
+            if r is FAILED:
+                conn.execute("UPDATE listings SET extraction = 'vlm_failed', vlm_missing = NULL WHERE id = %s",
+                             (lst["id"],))
+                continue
+            affected += _apply_vlm(conn, post, lst, r, images)
+        unresolved = any(lst["segment_idx"] not in results for lst in listings)
+        status = "awaiting_vlm" if unresolved else "done"
+        next_at, reason, refund = release if release else (None, None, False)
+        n = conn.execute(
+            """UPDATE posts SET status = %s, claim_token = NULL, lease_expires_at = NULL,
+                      next_attempt_at = coalesce(%s, next_attempt_at), last_error = %s,
+                      vlm_attempts = vlm_attempts - %s
+               WHERE id = %s AND claim_token = %s AND status = 'processing'""",
+            (status, next_at, reason, 1 if refund else 0, post.id, post.claim_token)).rowcount
+        if n != 1:
+            raise LostClaim(post.id)
+    # 4. Matching and notifications arrive in build step 10.
+    log.info("vlm post_id=%s segs=%d resolved=%d status=%s reason=%s", post.id, len(listings),
+             len(results), status, release[1] if release else "-")
+    return status
+
+
+def _multi_flag(seg_images: list[dict]) -> bool:
+    return any(len(i["detections"] or []) > 2 for i in seg_images)
+
+
+def _apply_vlm(conn: psycopg.Connection, post: PostRow, lst: dict, out: VlmOutput, images: list[dict]) -> list[int]:
+    items = out.items if out.is_shoe_listing else []
+    ids = [lst["id"]]
+    attrs, sources = lst["attrs"], lst["sources"]
+    if items:
+        attrs, sources = merge_attributes(lst["attrs"], lst["sources"], item_attrs(items[0]))
+    sets = ", ".join(f"{c} = %({c})s" for c in LISTING_ATTRS)
+    conn.execute(
+        f"""UPDATE listings SET {sets}, attr_sources = %(src)s, extraction = 'vlm', vlm_missing = NULL,
+                   prompt_version = %(pv)s WHERE id = %(id)s""",
+        {**{c: attrs.get(c) for c in LISTING_ATTRS}, "size_approx": bool(attrs.get("size_approx")),
+         "price_on_request": bool(attrs.get("price_on_request")), "src": Jsonb(sources), "pv": PROMPT_VERSION,
+         "id": lst["id"]})
+    seg_images = [i for i in images if i["segment_idx"] == lst["segment_idx"]]
+    if len(items) > 1 and (_multi_flag(seg_images) or lst["missing"] == []):
+        for k, item in enumerate(items[1:], start=1):
+            a, src = merge_attributes({}, {}, item_attrs(item))
+            row = {c: a.get(c) for c in LISTING_ATTRS}
+            row.update(size_approx=bool(a.get("size_approx")), price_on_request=bool(a.get("price_on_request")))
+            cols = list(row)
+            ids.append(conn.execute(
+                f"""INSERT INTO listings (post_id, segment_idx, item_idx, source, owner_session, sender_ref,
+                                          {", ".join(cols)}, attr_sources, extraction, embedding, cover_image_id,
+                                          first_seen_at, last_seen_at, prompt_version)
+                    VALUES (%(post_id)s, %(seg)s, %(k)s, %(source)s, %(owner)s, %(sender)s,
+                            {", ".join(f"%({c})s" for c in cols)}, %(src)s, 'vlm', %(emb)s, %(cover)s,
+                            %(seen)s, %(seen)s, %(pv)s)
+                    ON CONFLICT (post_id, segment_idx, item_idx) DO UPDATE SET
+                      {", ".join(f"{c} = EXCLUDED.{c}" for c in cols)}, attr_sources = EXCLUDED.attr_sources,
+                      extraction = 'vlm', prompt_version = EXCLUDED.prompt_version
+                    RETURNING id""",
+                {**row, "post_id": post.id, "seg": lst["segment_idx"], "k": k, "source": post.source,
+                 "owner": post.owner_session, "sender": post.sender_ref, "src": Jsonb(src), "emb": lst["embedding"],
+                 "cover": lst["cover_image_id"], "seen": post.last_msg_at, "pv": PROMPT_VERSION}).fetchone()[0])
+    return ids
+
+
 # ---------- threads ----------
 
 class Worker:
-    def __init__(self, ctx: LocalCtx):
+    def __init__(self, ctx: LocalCtx, vlm: VlmCtx | None = None):
         self.ctx = ctx
+        self.vlm = vlm
         self._event = threading.Event()
         self._stop = threading.Event()
         self._threads: list[threading.Thread] = []
@@ -484,6 +778,9 @@ class Worker:
         self._threads = [threading.Thread(target=self._local_loop, name="worker-local", daemon=True)]
         if not self.ctx.settings.demo_mode:
             self._threads.append(threading.Thread(target=self._sweep_loop, name="worker-sweeper", daemon=True))
+        if self.vlm is not None:
+            self._threads += [threading.Thread(target=self._vlm_loop, name=f"worker-vlm-{i}", daemon=True)
+                              for i in range(max(1, self.vlm.settings.vlm_concurrency))]
         for t in self._threads:
             t.start()
 
@@ -515,6 +812,27 @@ class Worker:
             else:
                 process_local(self.ctx, post)
 
+    def _vlm_loop(self) -> None:
+        s, v = self.ctx.settings, self.vlm
+        while not self._stop.is_set():
+            self._event.clear()
+            post = None
+            try:
+                if not v.breaker.is_open():
+                    with db.tx(v.pool) as conn:
+                        if budget_available(conn, s.vlm_daily_cap):
+                            post = claim_vlm(conn, s.lease_vlm_s)
+            except Exception:
+                log.exception("vlm claim failed")
+                self._stop.wait(s.worker_poll_s or 5)
+                continue
+            if post is None:
+                # no claimable post, budget spent or breaker open: wait for a wake or the poll interval
+                self._event.wait(s.worker_poll_s or 60)
+            else:
+                process_vlm(v, post)
+                self._event.set()  # a finished post may have released work for another VLM thread
+
     def _sweep_loop(self) -> None:
         while not self._stop.wait(SWEEP_INTERVAL_S):
             try:
@@ -544,9 +862,57 @@ def drain(ctx: LocalCtx, limit: int | None = None, progress_every: int = 50) -> 
     return done
 
 
+def drain_vlm(ctx: VlmCtx, limit: int | None = None, progress_every: int = 50) -> Counter:
+    """VLM_CONCURRENCY threads claim and process until nothing is claimable, the budget is spent, the breaker
+    opens, or `limit` posts were taken. Caps and the ledger apply exactly as in the server."""
+    s = ctx.settings
+    done: Counter = Counter()
+    lock = threading.Lock()
+    taken = [0]
+    t0 = time.monotonic()
+
+    def loop() -> None:
+        while True:
+            if ctx.breaker.is_open():
+                return
+            with lock:
+                if limit is not None and taken[0] >= limit:
+                    return
+                taken[0] += 1
+            with db.tx(ctx.pool) as conn:
+                post = claim_vlm(conn, s.lease_vlm_s) if budget_available(conn, s.vlm_daily_cap) else None
+            if post is None:
+                return
+            status = process_vlm(ctx, post) or "lost_claim"
+            with lock:
+                done[status] += 1
+                n = sum(done.values())
+            if n % progress_every == 0:
+                print(f"drain --vlm {n} posts, {n / (time.monotonic() - t0):.2f} posts/s, {dict(done)}", flush=True)
+
+    threads = [threading.Thread(target=loop, name=f"drain-vlm-{i}") for i in range(max(1, s.vlm_concurrency))]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    if ctx.breaker.is_open():
+        print("drain --vlm: breaker open (auth or billing error); stopped early", flush=True)
+    return done
+
+
+def make_vlm_ctx(pool: ConnectionPool, settings: Settings, store: MediaStore) -> VlmCtx | None:
+    from app.pipeline.vlm import get_backend
+
+    backend = get_backend(settings)
+    if backend is None:
+        return None
+    return VlmCtx(pool, settings, store, backend, CircuitBreaker(), RateLimiter(settings.vlm_rpm))
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m app.worker")
     ap.add_argument("--drain", action="store_true", required=True)
+    ap.add_argument("--vlm", action="store_true", help="also drain the VLM stage (spends credits; caps apply)")
     ap.add_argument("--limit", type=int)
     args = ap.parse_args(argv)
 
@@ -556,7 +922,7 @@ def main(argv: list[str] | None = None) -> int:
 
     configure_logging()
     settings = Settings()
-    pool = db.make_pool(settings.database_url, 2)
+    pool = db.make_pool(settings.database_url, max(2, settings.vlm_concurrency + 2) if args.vlm else 2)
     try:
         with db.tx(pool) as conn:
             role = conn.execute("SELECT value FROM db_meta WHERE key = 'role'").fetchone()[0]
@@ -566,10 +932,20 @@ def main(argv: list[str] | None = None) -> int:
         if settings.demo_mode:
             print("refusing: the demo media store arrives in build step 13", file=sys.stderr)
             return 2
+        with db.tx(pool) as conn:
+            local_work = conn.execute("SELECT count(*) FROM posts WHERE status IN ('received', 'processing')"
+                                      ).fetchone()[0]
         models = ModelRegistry(settings.models_dir, settings.demo_mode)
-        models.load()
+        if local_work:
+            models.load()  # ~10–70 s; skipped when only the VLM stage has work
         ctx = LocalCtx(pool, settings, models, LocalDirStore(settings.media_dir))
-        done = drain(ctx, args.limit)
+        done = drain(ctx, args.limit) if local_work else Counter()
+        if args.vlm:
+            vctx = make_vlm_ctx(pool, settings, ctx.store)
+            if vctx is None:
+                print("VLM_PROVIDER is off; skipping the VLM stage", file=sys.stderr)
+            else:
+                done.update({f"vlm:{k}": v for k, v in drain_vlm(vctx, args.limit).items()})
         with db.tx(pool) as conn:
             by_status = conn.execute(
                 "SELECT status, coalesce(outcome, '-'), count(*) FROM posts GROUP BY 1, 2 ORDER BY 1, 2").fetchall()

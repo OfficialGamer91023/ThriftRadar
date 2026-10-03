@@ -152,7 +152,7 @@ def test_multi_item_goes_to_vlm(conn, pool, store):
     make_post(conn, store, "p", [1, 2], caption=COMPLETE)
     status = process_local(ctx_for(pool, store, FakeModels(detector=FakeDetector(boxes=3))), claim(pool))
     assert status == "awaiting_vlm"
-    assert one(conn, "SELECT vlm_missing FROM listings")[0] is None  # nothing missing, still multi_item
+    assert one(conn, "SELECT vlm_missing FROM listings")[0] == []  # nothing missing, but multi_item: VLM still wanted
 
 
 def test_no_shoe_makes_no_listing(conn, pool, store):

@@ -6,8 +6,15 @@ import psycopg
 import pytest
 
 from app.migrate import apply_migrations
+from app.settings import Settings
 
 PG_BASE = os.environ.get("TEST_PG_BASE", "postgresql://thrift:thrift@127.0.0.1:5433")
+
+# Tests never read backend/.env (it holds the real provider and keys) and never spend money: tests that need
+# a VLM pass a fake backend explicitly. Blank keys guard against keys exported in the shell.
+Settings.model_config["env_file"] = None
+for _key in ("FEATHERLESS_API_KEY", "OPENROUTER_API_KEY", "VLM_PROVIDER"):
+    os.environ.pop(_key, None)
 
 
 def _recreate(dbname: str) -> str:

@@ -46,6 +46,7 @@ class Settings(BaseSettings):
     vlm_provider: str = "ollama"
     vlm_model: str = "qwen2.5vl:7b"
     openrouter_api_key: str | None = None
+    featherless_api_key: str | None = None
     vlm_price_in_per_m: float = 0.0
     vlm_price_out_per_m: float = 0.0
     vlm_daily_cap: int = 2000
@@ -94,8 +95,8 @@ class Settings(BaseSettings):
                 if name not in self.model_fields_set:
                     setattr(self, name, value)
             self.notify_macos = False
-        if self.vlm_provider not in ("ollama", "openrouter", "off"):
-            raise ValueError("VLM_PROVIDER must be ollama, openrouter or off")
+        if self.vlm_provider not in ("ollama", "openrouter", "featherless", "off"):
+            raise ValueError("VLM_PROVIDER must be ollama, openrouter, featherless or off")
         return self
 
     def check_startup(self) -> None:
@@ -107,5 +108,7 @@ class Settings(BaseSettings):
             missing += [n for n in ("session_secret", "sender_hmac_key") if not getattr(self, n)]
         if self.vlm_provider == "openrouter" and not self.openrouter_api_key:
             missing.append("openrouter_api_key")
+        if self.vlm_provider == "featherless" and not self.featherless_api_key:
+            missing.append("featherless_api_key")
         if missing:
             raise ConfigError("missing required settings: " + ", ".join(n.upper() for n in missing))

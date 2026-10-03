@@ -227,20 +227,20 @@ def parse_caption(text: str | None) -> CaptionFields:
 
 # ---------- size conversion ----------
 
-# Men's, adidas-style chart. UK→EU; US men's = UK + 0.5.
+# Men's, adidas-style chart. UK→EU; US men's = UK + 0.5, US women's = UK + 2.
 _UK_TO_EU = {
     3: 35.5, 3.5: 36, 4: 36.5, 4.5: 37, 5: 38, 5.5: 38.5, 6: 39, 6.5: 40, 7: 40.5, 7.5: 41,
     8: 42, 8.5: 42.5, 9: 43, 9.5: 44, 10: 44.5, 10.5: 45, 11: 46, 11.5: 46.5, 12: 47, 12.5: 47.5, 13: 48,
 }
 
 
-def to_size_eu(value: Decimal | None, system: str | None) -> tuple[Decimal | None, bool]:
+def to_size_eu(value: Decimal | None, system: str | None, women: bool = False) -> tuple[Decimal | None, bool]:
     if value is None:
         return None, False
     if system == "EU":
         return Decimal(value), False
     if system in ("UK", "US"):
-        uk = float(value) - (0.5 if system == "US" else 0)
+        uk = float(value) - ((2 if women else 0.5) if system == "US" else 0)
         eu = _UK_TO_EU.get(uk)
         return (Decimal(str(eu)), True) if eu is not None else (None, False)
     return None, False

@@ -109,3 +109,39 @@ def make_post(conn, store, key: str, seeds: list[int], *, text: str | None = Non
                                     messages=msgs, vlm_policy=vlm_policy, seed_attrs=seed_attrs))
     conn.commit()
     return r.post_id
+
+
+class FakeVlmBackend:
+    """Returns queued results (VlmResult, or a str that becomes an ok body); records every request."""
+
+    name = "fake"
+
+    def __init__(self, *results, on_call=None):
+        self.results = list(results)
+        self.requests: list[dict] = []
+        self.on_call = on_call
+
+    @property
+    def calls(self) -> int:
+        return len(self.requests)
+
+    def complete(self, req):
+        from app.pipeline.vlm import VlmResult
+
+        self.requests.append(req)
+        if self.on_call:
+            self.on_call()
+        r = self.results.pop(0) if self.results else VlmResult("timeout", error="no more fake results")
+        return VlmResult("ok", 200, r, 2000, 200, None, 5) if isinstance(r, str) else r
+
+
+def vlm_doc(*items, shoe: bool = True) -> str:
+    import json
+
+    def item(**kw):
+        base = {"brand": None, "model": None, "colour": None, "size": {"value": None, "system": None},
+                "price": {"amount": None, "currency": None}, "condition": None, "gender": None,
+                "image_indices": [0], "confidence": 0.9}
+        base.update(kw)
+        return base
+    return json.dumps({"is_shoe_listing": shoe, "items": [item(**i) for i in items]})

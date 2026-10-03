@@ -14,7 +14,7 @@ from app.media_store import LocalDirStore
 from app.pipeline.models import ModelRegistry
 from app.security import BodySizeLimitMiddleware, DemoDenylist, LocalGuard, SecurityHeaders
 from app.settings import Settings
-from app.worker import LocalCtx, Worker, sweep_once
+from app.worker import LocalCtx, Worker, make_vlm_ctx, sweep_once
 
 log = logging.getLogger(__name__)
 
@@ -78,7 +78,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     models = ModelRegistry(settings.models_dir, settings.demo_mode)
     media_store = None if settings.demo_mode else LocalDirStore(settings.media_dir)
     # The demo media store (bundled seed + Postgres blobs) arrives in build step 13; no worker until then.
-    worker = Worker(LocalCtx(pool, settings, models, media_store)) if media_store is not None else None
+    worker = None
+    if media_store is not None:
+        worker = Worker(LocalCtx(pool, settings, models, media_store), make_vlm_ctx(pool, settings, media_store))
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):

@@ -4,7 +4,8 @@ import { useEffect, useState } from "react";
 import Notice from "@/components/Notice";
 import { apiFetch, errorText } from "@/lib/api";
 import { useConfig } from "@/lib/config";
-import type { Status } from "@/lib/types";
+import { ago } from "@/lib/format";
+import type { ListenerStatus, Status } from "@/lib/types";
 
 const QUEUE_LABEL: Record<string, string> = {
   received: "Waiting",
@@ -14,24 +15,51 @@ const QUEUE_LABEL: Record<string, string> = {
   failed: "Failed",
 };
 
+const LISTENER_TEXT: Record<ListenerStatus["state"], [string, "ok" | "warn" | "stop"]> = {
+  never_seen: ["not started", "warn"],
+  connecting: ["connecting", "warn"],
+  awaiting_qr: ["waiting for the QR scan", "warn"],
+  open: ["connected", "ok"],
+  reconnecting: ["reconnecting", "warn"],
+  logged_out: ["logged out: re-pair", "stop"],
+  replaced: ["replaced by another client", "stop"],
+  bad_session: ["session broken: re-pair", "stop"],
+  forbidden: ["account restricted", "stop"],
+  stopped: ["stopped", "stop"],
+};
+
+function listenerPill(l: ListenerStatus | null): [string, "ok" | "warn" | "stop"] {
+  if (!l) return ["unknown", "warn"];
+  const [text, tone] = LISTENER_TEXT[l.state] ?? ["unknown", "warn"];
+  if (l.state !== "never_seen" && l.stale) return [`no heartbeat: ${text}`, "stop"];
+  return [text, tone];
+}
+
 export default function StatusPage() {
-  const demo = useConfig()?.demo ?? false;
+  const config = useConfig();
+  const demo = config?.demo ?? false;
+  const [listener, setListener] = useState<ListenerStatus | null>(null);
   const [s, setS] = useState<Status | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
-    const tick = () =>
+    const local = config !== null && !config.demo; // the listener exists only on your Mac
+    const tick = () => {
       apiFetch<Status>("/api/status")
         .then((v) => alive && (setS(v), setError(null)))
         .catch((e) => alive && setError(errorText(e)));
-    void tick();
+      if (local) {
+        apiFetch<ListenerStatus>("/api/listener/status").then((v) => alive && setListener(v)).catch(() => {});
+      }
+    };
+    tick();
     const t = setInterval(tick, 10_000);
     return () => {
       alive = false;
       clearInterval(t);
     };
-  }, []);
+  }, [config]);
 
   if (error && !s) return <Notice kind="error">{error}</Notice>;
   if (!s) return <p className="muted">Loading…</p>;
@@ -95,7 +123,19 @@ export default function StatusPage() {
           {!demo && (
             <div className="row" style={{ justifyContent: "space-between" }}>
               <span>WhatsApp listener</span>
-              <span className="pill warn">not set up yet</span>
+              <span className={`pill ${listenerPill(listener)[1]}`}>{listenerPill(listener)[0]}</span>
+            </div>
+          )}
+          {!demo && listener?.last_message_at && (
+            <div className="row" style={{ justifyContent: "space-between" }}>
+              <span>Last group message</span>
+              <span className="mono">{ago(listener.last_message_at)}</span>
+            </div>
+          )}
+          {!demo && (listener?.spool_pending ?? 0) > 0 && (
+            <div className="row" style={{ justifyContent: "space-between" }}>
+              <span>Albums waiting to be sent</span>
+              <span className="mono">{listener?.spool_pending}</span>
             </div>
           )}
         </div>

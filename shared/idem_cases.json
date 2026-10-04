@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "note": "idempotency_key(source, chat_id, keys); both ids.py and listener/src/poster.js must match",
+  "cases": [
+    {
+      "source": "whatsapp",
+      "chat_id": "120363012345678901@g.us",
+      "keys": [
+        "3EB0A1",
+        "3EB0A2",
+        "3EB0A3"
+      ],
+      "expected": "62623d7fb6563c4759e8160e5d013bb2631d26b655f6d3fb74fe78eb98cb8868"
+    },
+    {
+      "source": "whatsapp",
+      "chat_id": "120363012345678901@g.us",
+      "keys": [
+        "3EB0A3",
+        "3EB0A1",
+        "3EB0A2",
+        "3EB0A1"
+      ],
+      "expected": "62623d7fb6563c4759e8160e5d013bb2631d26b655f6d3fb74fe78eb98cb8868"
+    },
+    {
+      "source": "chat_export",
+      "chat_id": "example-group",
+      "keys": [
+        "l12:3",
+        "l12:4"
+      ],
+      "expected": "91e4ccfafd48ae83a70a27f35065576cfd89d5fb4ca10c73db6e5efbda6723b1"
+    },
+    {
+      "source": "whatsapp",
+      "chat_id": "120363099999999999@g.us",
+      "keys": [
+        "ABC"
+      ],
+      "expected": "d9e5919d3803f60a83fe386deb558f853d962fd2ca28ed018611dfc73b4803ee"
+    }
+  ]
+}

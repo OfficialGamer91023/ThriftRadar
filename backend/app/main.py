@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app import db
-from app.api import credits, demo_upload, health, ingest, login, posts, search, wishlists
+from app.api import credits, demo_upload, health, ingest, listener_status, login, posts, search, wishlists
 from app.media_store import BundledStore, CompositeStore, LocalDirStore, PgBlobStore
 from app.notify import get_notifier
 from app.pipeline.models import ModelRegistry
@@ -154,7 +154,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         mounted += ["login", "demo_upload"]
     else:
         app.include_router(ingest.router)
-        mounted.append("ingest")
+        app.include_router(listener_status.router)
+        mounted += ["ingest", "listener_status"]
     # Unknown API paths get a JSON 404 for every method, never the web app's HTML or a static-files 405.
     @app.api_route("/api/{rest:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"], include_in_schema=False)
     def api_not_found(rest: str):

@@ -42,7 +42,7 @@ cd backend && DATABASE_URL=postgresql://thrift:thrift@127.0.0.1:5433/thriftradar
 cd backend && DEMO_MODE=1 DATABASE_URL=…/thriftradar_demo_try SESSION_SECRET=x SENDER_HMAC_KEY=y VLM_PROVIDER=off TRUST_PROXY_HOPS=0 MODELS_DIR=../data/models uv run uvicorn app.main:create_app --factory --port 8001
 ```
 
-Not set up yet: the listener (Node ≥ 20, `node:test`, `npm test` in `listener/`; `package.json` exists with an exact Baileys pin but deps aren't installed until build step 11). Tests needing real weights are marked `@pytest.mark.models` and skip if `data/models` hasn't been baked. `backend/.env` holds the real `INGEST_TOKEN` and `SENDER_HMAC_KEY`; never change `SENDER_HMAC_KEY` (stored sender/chat refs depend on it).
+Listener: Node ≥ 20 (`cd listener && npm install && npm test`); `node src/index.js --list-groups` pairs and prints group JIDs (run it in your own terminal: the QR shows there); config in `listener/.env` (gitignored). `deploy/macos/install.sh` keeps backend + listener running under launchd (logs in `~/Library/Logs/ThriftRadar/`; `--uninstall` removes them). Tests needing real weights are marked `@pytest.mark.models` and skip if `data/models` hasn't been baked. `backend/.env` holds the real `INGEST_TOKEN` and `SENDER_HMAC_KEY`; never change `SENDER_HMAC_KEY` (stored sender/chat refs depend on it).
 
 ## Architecture (big picture)
 

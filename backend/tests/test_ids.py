@@ -35,3 +35,13 @@ def test_sender_and_chat_refs_are_domain_separated():
 def test_empty_key_rejected():
     with pytest.raises(ValueError):
         sender_ref("x@lid", "")
+
+
+def test_idempotency_key_matches_the_shared_fixture():
+    """The listener's poster.js is tested against the same file (cross-language fixture)."""
+    import json
+    from pathlib import Path
+
+    data = json.loads((Path(__file__).resolve().parents[2] / "shared" / "idem_cases.json").read_text())
+    for c in data["cases"]:
+        assert idempotency_key(c["source"], c["chat_id"], c["keys"]) == c["expected"]

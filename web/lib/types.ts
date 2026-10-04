@@ -76,3 +76,14 @@ export interface Config {
   demo: boolean;
   features: { whatsapp: boolean };
 }
+
+export interface ListenerStatus {
+  state: "never_seen" | "connecting" | "awaiting_qr" | "open" | "reconnecting" | "logged_out" | "replaced" | "bad_session" | "forbidden" | "stopped";
+  stale: boolean;
+  detail?: string | null;
+  last_heartbeat_at?: string | null;
+  last_message_at?: string | null;
+  spool_pending?: number;
+  counts?: Record<string, number>;
+  version?: string | null;
+}

@@ -985,7 +985,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--limit", type=int)
     args = ap.parse_args(argv)
 
-    from app.main import configure_logging
+    from app.main import configure_logging, demo_media_store
     from app.media_store import LocalDirStore
     from app.pipeline.models import ModelRegistry
 
@@ -998,9 +998,6 @@ def main(argv: list[str] | None = None) -> int:
         if role != ("demo" if settings.demo_mode else "local"):
             print(f"refusing: db_meta.role is {role!r}", file=sys.stderr)
             return 2
-        if settings.demo_mode:
-            print("refusing: the demo media store arrives in build step 13", file=sys.stderr)
-            return 2
         with db.tx(pool) as conn:
             local_work = conn.execute("SELECT count(*) FROM posts WHERE status IN ('received', 'processing')"
                                       ).fetchone()[0]
@@ -1010,7 +1007,8 @@ def main(argv: list[str] | None = None) -> int:
         from app.notify import get_notifier
 
         notifier = get_notifier(settings)
-        ctx = LocalCtx(pool, settings, models, LocalDirStore(settings.media_dir), notifier)
+        store = demo_media_store(settings, pool) if settings.demo_mode else LocalDirStore(settings.media_dir)
+        ctx = LocalCtx(pool, settings, models, store, notifier)  # demo: the image build drains the seed posts
         done = drain(ctx, args.limit) if local_work else Counter()
         if args.vlm:
             vctx = make_vlm_ctx(pool, settings, ctx.store, notifier)

@@ -1,0 +1,11 @@
+**/.env*
+**/auth*
+**/node_modules
+**/.next
+web/out
+**/__pycache__
+**/*.pyc
+**/spool
+**/state
+*.pt
+.git

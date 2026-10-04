@@ -1,0 +1,7 @@
+{$SITE} {
+	encode gzip
+	request_body {
+		max_size 25MB
+	}
+	reverse_proxy app:7860
+}

@@ -3,6 +3,7 @@ Mounted only when DEMO_MODE=1, and each handler re-checks it: the credentials ar
 nothing unless the server is in demo mode."""
 
 import hmac
+import logging
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
@@ -12,6 +13,7 @@ from app.ratelimit import guard, ip
 from app.sessions import COOKIE, MAX_AGE_S, new_session_id, session_id, sign
 
 router = APIRouter()
+log = logging.getLogger(__name__)
 
 
 class LoginIn(BaseModel):
@@ -28,6 +30,8 @@ def login(request: Request, body: LoginIn):
     s = request.app.state.settings
     if not s.demo_mode:
         return _not_found()
+    xff = [p for p in request.headers.get("x-forwarded-for", "").split(",") if p.strip()]
+    log.info("login xff_entries=%d", len(xff))  # the count only: verifies TRUST_PROXY_HOPS on the Space
     if limited := guard(request, "login", ip(request)):
         return limited
     email_ok = hmac.compare_digest(body.email.strip().lower().encode(), s.demo_email.lower().encode())

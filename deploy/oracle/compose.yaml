@@ -1,0 +1,23 @@
+# ThriftRadar demo on an Oracle Cloud Always Free VM. Spec: DESIGN.md §4.10 (step 15, host change).
+# The app is built from the same bundle as the Space image; Caddy terminates HTTPS (Let's Encrypt) for
+# <ip>.sslip.io and appends the client address to X-Forwarded-For, so TRUST_PROXY_HOPS=1 holds.
+services:
+  app:
+    build: ./space
+    image: thriftradar-demo:latest
+    restart: unless-stopped
+    env_file: ./secrets.env          # SESSION_SECRET, FEATHERLESS_API_KEY (mode 0600, never in git)
+    expose: ["7860"]                 # reachable only through Caddy
+    mem_limit: 5g
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    environment:
+      SITE: ${SITE:?set SITE in .env, e.g. 1-2-3-4.sslip.io}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    depends_on: [app]
+volumes:
+  caddy_data:

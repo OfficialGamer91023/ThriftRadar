@@ -36,6 +36,10 @@ cd backend && uv run python -m scripts.requeue --vlm --source chat_export   # dr
 cd backend && uv run python -m scripts.wishlist add "white sneakers size 42 under 5000"   # wishlists from the terminal (also list / matches ID / remove ID / test-notify)
 cd web && npm install && npm run build              # web app -> web/out; the backend serves it at http://127.0.0.1:8000 (restart uvicorn after the first build)
 cd web && npm run typecheck
+# try demo mode locally on a throwaway DB (AI off, nothing spent); log in at http://127.0.0.1:8001/login/
+psql postgresql://thrift:thrift@127.0.0.1:5433/postgres -c 'CREATE DATABASE thriftradar_demo_try'
+cd backend && DATABASE_URL=postgresql://thrift:thrift@127.0.0.1:5433/thriftradar_demo_try uv run python -m app.migrate --demo
+cd backend && DEMO_MODE=1 DATABASE_URL=…/thriftradar_demo_try SESSION_SECRET=x SENDER_HMAC_KEY=y VLM_PROVIDER=off TRUST_PROXY_HOPS=0 MODELS_DIR=../data/models uv run uvicorn app.main:create_app --factory --port 8001
 ```
 
 Not set up yet: the listener (Node ≥ 20, `node:test`, `npm test` in `listener/`; `package.json` exists with an exact Baileys pin but deps aren't installed until build step 11). Tests needing real weights are marked `@pytest.mark.models` and skip if `data/models` hasn't been baked. `backend/.env` holds the real `INGEST_TOKEN` and `SENDER_HMAC_KEY`; never change `SENDER_HMAC_KEY` (stored sender/chat refs depend on it).

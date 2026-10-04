@@ -76,6 +76,17 @@ p { margin: 0; }
 .nav a { text-decoration: none; padding: 7px 12px; border-radius: 999px; font-weight: 500; color: var(--muted); }
 .nav a:hover { color: var(--ink); background: var(--sunk); }
 .nav a[aria-current="page"] { color: var(--ink); background: var(--surface); box-shadow: inset 0 0 0 1px var(--line); }
+.navbtn { border: 0; background: transparent; padding: 7px 12px; border-radius: 999px; font-weight: 500; color: var(--muted); cursor: pointer; }
+.navbtn:hover { color: var(--ink); background: var(--sunk); }
+.picks { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; }
+.picks figure { margin: 0; position: relative; aspect-ratio: 1; border-radius: 8px; overflow: hidden; background: var(--sunk); }
+.picks img { width: 100%; height: 100%; object-fit: cover; }
+.picks button { position: absolute; top: 4px; right: 4px; padding: 2px 8px; font-size: 0.8rem; }
+.steps { display: grid; gap: 6px; margin: 0; padding-left: 20px; }
+.steps li[data-state="done"] { color: var(--ok); }
+.steps li[data-state="now"] { font-weight: 600; }
+.steps li[data-state="todo"] { color: var(--muted); }
+.creds { font-family: var(--font-mono), monospace; background: var(--sunk); border-radius: 8px; padding: 10px 12px; display: grid; gap: 2px; }
 
 main { padding-block: 24px 64px; }
 
@@ -171,7 +182,8 @@ input, select, button, textarea { font: inherit; color: inherit; }
   .topbar .wrap { gap: 8px; }
   .wordmark { font-size: 1.2rem; }
   .nav { gap: 0; }
-  .nav a { padding: 6px 8px; font-size: 0.9rem; }
+  .nav { flex-wrap: wrap; justify-content: flex-end; }
+  .nav a, .navbtn { padding: 6px 8px; font-size: 0.9rem; }
   .card .body { padding: 9px 10px 10px; }
   .card .size { font-size: 0.85rem; }
   .sticker { font-size: 0.92rem; top: 8px; right: 8px; }

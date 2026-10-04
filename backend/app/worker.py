@@ -312,7 +312,8 @@ def _process_local(ctx: LocalCtx, post: PostRow) -> str:
             plan.hit = find_repost_phash(
                 conn, post_id=post.id, sender_ref=post.sender_ref, ref_time=post.first_msg_at,
                 phashes=[i.phash for i in plan.images], window_days=s.repost_window_days,
-                max_dist=s.phash_max_dist, xseller_max_dist=s.phash_xseller_max_dist)
+                max_dist=s.phash_max_dist, xseller_max_dist=s.phash_xseller_max_dist,
+                owner_session=post.owner_session)
             if plan.hit:
                 plan.kind = "repost"
 
@@ -401,7 +402,7 @@ def _process_local(ctx: LocalCtx, post: PostRow) -> str:
                 plan.attrs["brand"], plan.sources["brand"] = brand, "siglip"
                 continue
             with db.tx(ctx.pool) as conn:
-                if knn := knn_brand(conn, post.id, plan.seg_emb):
+                if knn := knn_brand(conn, post.id, plan.seg_emb, owner_session=post.owner_session):
                     plan.attrs["brand"], plan.sources["brand"] = knn[0], "knn"
 
     for plan in plans:
@@ -535,10 +536,28 @@ def retry_unnotified(pool: ConnectionPool, notifier) -> int:
     return len(ids)
 
 
+def purge_demo_uploads(conn: psycopg.Connection) -> dict:
+    """Demo: uploads, their photos and session wishlists live 24 h. Deleting a post cascades to its messages,
+    images, listings, sightings, matches and ledger rows; seed rows are never touched."""
+    posts = conn.execute(
+        "DELETE FROM posts WHERE source = 'demo_upload' AND created_at < now() - interval '24 hours'").rowcount
+    wishlists = conn.execute(
+        "DELETE FROM wishlists WHERE owner <> 'local' AND created_at < now() - interval '24 hours'").rowcount
+    blobs = conn.execute(
+        """DELETE FROM media_blobs b WHERE b.created_at < now() - interval '24 hours'
+             AND NOT EXISTS (SELECT 1 FROM images i WHERE i.sha256 = b.sha256)
+             AND NOT EXISTS (SELECT 1 FROM wishlists w WHERE w.ref_image_sha = b.sha256)""").rowcount
+    if posts or wishlists or blobs:
+        log.info("purge_demo_uploads posts=%d wishlists=%d blobs=%d", posts, wishlists, blobs)
+    return {"posts": posts, "wishlists": wishlists, "blobs": blobs}
+
+
 def sweep_once(pool: ConnectionPool, settings: Settings, notifier=None) -> None:
     with db.tx(pool) as conn:
         sweep_stale_claims(conn)
         sweep_exhausted(conn, settings.max_local_attempts)
+        if settings.demo_mode:
+            purge_demo_uploads(conn)
     sweep_unmatched(pool, notifier)
     retry_unnotified(pool, notifier)
 
@@ -826,9 +845,8 @@ class Worker:
         self._threads: list[threading.Thread] = []
 
     def start(self) -> None:
-        self._threads = [threading.Thread(target=self._local_loop, name="worker-local", daemon=True)]
-        if not self.ctx.settings.demo_mode:
-            self._threads.append(threading.Thread(target=self._sweep_loop, name="worker-sweeper", daemon=True))
+        self._threads = [threading.Thread(target=self._local_loop, name="worker-local", daemon=True),
+                         threading.Thread(target=self._sweep_loop, name="worker-sweeper", daemon=True)]
         if self.vlm is not None:
             self._threads += [threading.Thread(target=self._vlm_loop, name=f"worker-vlm-{i}", daemon=True)
                               for i in range(max(1, self.vlm.settings.vlm_concurrency))]

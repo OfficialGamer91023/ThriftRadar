@@ -80,7 +80,7 @@ function Detail() {
             ))}
           </div>
           {l.extraction === "vlm_failed" && (
-            <Notice kind="warn">The AI couldn't read this post, so only the details found on this Mac are shown.</Notice>
+            <Notice kind="warn">The AI couldn't read this post, so only the details found on-device are shown.</Notice>
           )}
 
           <div className="panel">

@@ -1,5 +1,5 @@
 """Text and image search. Spec: DESIGN.md §4.7 `GET /api/search`, `POST /api/search/image`.
-Local mode in build step 10; sessions and rate limits arrive with step 13."""
+Demo: a session and a per-IP rate limit; results are seed listings plus the session's own uploads."""
 
 import io
 
@@ -14,6 +14,8 @@ from app.api.listings_view import LISTING_COLS, listing_json, visibility_sql
 from app.images import InvalidImage, normalize_image
 from app.matching import VLM_SIZE_SLACK, brand_family_sql, semantic_text, wishlist_filters
 from app.pipeline.detect import primary_box
+from app.ratelimit import guard, ip
+from app.sessions import viewer
 
 router = APIRouter()
 MAX_Q = 200
@@ -60,6 +62,11 @@ def search_listings(conn: psycopg.Connection, emb: np.ndarray | None, filters: d
 @router.get("/api/search")
 def search(request: Request, q: str | None = Query(None, max_length=MAX_Q), size: float | None = None,
            max_price: int | None = None, brand: str | None = None, limit: int = Query(48, ge=1, le=MAX_LIMIT)):
+    v = viewer(request)
+    if isinstance(v, JSONResponse):
+        return v
+    if limited := guard(request, "search", ip(request)):
+        return limited
     q = (q or "").strip() or None
     filters = wishlist_filters(q, size=size, max_price=max_price, brand=brand)
     if q is None and not any(v is not None for v in filters.values()):
@@ -72,7 +79,7 @@ def search(request: Request, q: str | None = Query(None, max_length=MAX_Q), size
             return JSONResponse({"detail": "models_loading"}, 503)
         emb = models.embedder.embed_text([semantic])[0]  # brand, size and price are already hard filters
     with db.tx(request.app.state.pool) as conn:
-        rows = search_listings(conn, emb, filters, limit, None)
+        rows = search_listings(conn, emb, filters, limit, v.visible_to)
     return {"query": q, "filters": _filters_json(filters), "order": "similar" if emb is not None else "newest",
             "results": [listing_json(r) for r in rows]}
 
@@ -89,6 +96,11 @@ def embed_photo(models, data: bytes) -> tuple[np.ndarray, bytes, bytes]:
 
 @router.post("/api/search/image")
 async def search_image(request: Request, file: UploadFile, limit: int = Query(24, ge=1, le=MAX_LIMIT)):
+    v = viewer(request)
+    if isinstance(v, JSONResponse):
+        return v
+    if limited := guard(request, "image_search", ip(request)):
+        return limited
     models = _models_or_503(request)
     if models is None:
         return JSONResponse({"detail": "models_loading"}, 503)
@@ -97,7 +109,7 @@ async def search_image(request: Request, file: UploadFile, limit: int = Query(24
     except InvalidImage as e:
         return JSONResponse({"detail": f"invalid_image:{e.reason}"}, 422)
     with db.tx(request.app.state.pool) as conn:
-        rows = search_listings(conn, emb, {}, limit, None)
+        rows = search_listings(conn, emb, {}, limit, v.visible_to)
     return {"results": [listing_json(r) for r in rows]}
 
 

@@ -15,7 +15,6 @@ _DEMO_DEFAULTS = {
     "vlm_daily_cap": 100,
     "vlm_concurrency": 2,
     "vlm_timeout_s": 60,
-    "worker_poll_s": 0,
     "trust_proxy_hops": 1,
     "models_dir": "/models",
 }
@@ -35,6 +34,7 @@ class Settings(BaseSettings):
     db_pool_max: int = 8
     media_dir: str = str(Path(__file__).resolve().parents[2] / "data" / "media")
     models_dir: str = str(Path(__file__).resolve().parents[2] / "data" / "models")
+    seed_dir: str = str(Path(__file__).resolve().parents[1] / "seed")  # backend/seed (step 14)
     load_models: bool = True  # tests turn this off
 
     ingest_token: str | None = None

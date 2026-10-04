@@ -1,5 +1,5 @@
 """Listings feed and detail, post status, media, system status. Spec: DESIGN.md §4.7.
-Local mode in build step 10; demo sessions arrive with step 13."""
+Demo: every route needs a session and sees seed listings plus the session's own uploads."""
 
 import re
 from datetime import datetime
@@ -8,8 +8,9 @@ from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse, Response
 
 from app import db
-from app.api.listings_view import LISTING_COLS, listing_json, media_url
+from app.api.listings_view import LISTING_COLS, listing_json, media_url, visibility_sql
 from app.media_store import MediaMissing
+from app.sessions import viewer
 
 router = APIRouter()
 SHA_HEX = re.compile(r"^[0-9a-f]{64}$")
@@ -18,8 +19,11 @@ SHA_HEX = re.compile(r"^[0-9a-f]{64}$")
 @router.get("/api/listings")
 def listings(request: Request, cursor: str | None = None, limit: int = Query(24, ge=1, le=50)):
     """Newest first, keyset-paginated on (last_seen_at, id). `cursor` is the previous page's `next`."""
-    args: dict = {"limit": limit}
-    where = "l.status = 'active'"
+    v = viewer(request)
+    if isinstance(v, JSONResponse):
+        return v
+    args: dict = {"limit": limit, "owner": v.visible_to}
+    where = f"l.status = 'active' AND {visibility_sql('l', v.visible_to)}"
     if cursor:
         try:
             ts, lid = cursor.rsplit("_", 1)
@@ -38,10 +42,14 @@ def listings(request: Request, cursor: str | None = None, limit: int = Query(24,
 
 @router.get("/api/listings/{listing_id}")
 def listing_detail(request: Request, listing_id: int):
+    v = viewer(request)
+    if isinstance(v, JSONResponse):
+        return v
     with db.tx(request.app.state.pool) as conn:
         row = conn.execute(
             f"""SELECT {LISTING_COLS} FROM listings l LEFT JOIN images ci ON ci.id = l.cover_image_id
-                WHERE l.id = %s""", (listing_id,)).fetchone()
+                WHERE l.id = %(id)s AND {visibility_sql('l', v.visible_to)}""",
+            {"id": listing_id, "owner": v.visible_to}).fetchone()
         if row is None:
             return JSONResponse({"detail": "not_found"}, 404)
         out = listing_json(row)
@@ -58,8 +66,14 @@ def listing_detail(request: Request, listing_id: int):
 
 @router.get("/api/posts/{post_id}")
 def post_status(request: Request, post_id: int):
+    """Demo: the uploader's own posts only (seed posts too are 404)."""
+    v = viewer(request)
+    if isinstance(v, JSONResponse):
+        return v
+    owner_only = "" if v.visible_to is None else " AND owner_session = %(owner)s"
     with db.tx(request.app.state.pool) as conn:
-        row = conn.execute("SELECT status, outcome FROM posts WHERE id = %s", (post_id,)).fetchone()
+        row = conn.execute(f"SELECT status, outcome FROM posts WHERE id = %(id)s{owner_only}",
+                           {"id": post_id, "owner": v.visible_to}).fetchone()
         if row is None:
             return JSONResponse({"detail": "not_found"}, 404)
         rows = conn.execute(
@@ -70,11 +84,17 @@ def post_status(request: Request, post_id: int):
 
 @router.get("/media/{sha}")
 def media(request: Request, sha: str):
+    v = viewer(request)
+    if isinstance(v, JSONResponse):
+        return v
     if not SHA_HEX.match(sha):
         return JSONResponse({"detail": "not_found"}, 404)
     raw = bytes.fromhex(sha)
     with db.tx(request.app.state.pool) as conn:
-        known = conn.execute("SELECT EXISTS (SELECT 1 FROM images WHERE sha256 = %s)", (raw,)).fetchone()[0]
+        known = conn.execute(
+            f"""SELECT EXISTS (SELECT 1 FROM images i JOIN posts p ON p.id = i.post_id
+                               WHERE i.sha256 = %(sha)s AND {visibility_sql('p', v.visible_to)})""",
+            {"sha": raw, "owner": v.visible_to}).fetchone()[0]
     store = request.app.state.media_store
     if not known or store is None:
         return JSONResponse({"detail": "not_found"}, 404)
@@ -88,6 +108,9 @@ def media(request: Request, sha: str):
 
 @router.get("/api/status")
 def status(request: Request):
+    v = viewer(request)
+    if isinstance(v, JSONResponse):
+        return v
     state = request.app.state
     s = state.settings
     with db.tx(state.pool) as conn:
@@ -96,7 +119,7 @@ def status(request: Request):
             """SELECT count(*) FILTER (WHERE status IN ('reserved', 'ok', 'bad_json', 'timeout')),
                       coalesce(sum(cost_usd), 0)
                FROM vlm_calls WHERE day = (now() AT TIME ZONE 'utc')::date""").fetchone()
-        wishlists = conn.execute("SELECT count(*) FROM wishlists WHERE active").fetchone()[0]
+        wishlists = conn.execute("SELECT count(*) FROM wishlists WHERE active AND owner = %s", (v.owner,)).fetchone()[0]
     vlm = state.worker.vlm if state.worker is not None else None
     return {
         "queue": queue,

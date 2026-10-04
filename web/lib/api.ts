@@ -18,7 +18,9 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
   const res = await fetch(path, { ...init, headers, credentials: "same-origin" });
   if (res.status === 204) return undefined as T;
   if (res.ok) return (await res.json()) as T;
-  if (res.status === 401 && typeof window !== "undefined") {
+  // demo: a missing or expired session sends the visitor to the login page (not for the login call itself)
+  if (res.status === 401 && typeof window !== "undefined" && !path.startsWith("/api/login")
+      && !window.location.pathname.startsWith("/login")) {
     window.location.href = "/login/";
   }
   let detail = res.statusText;
@@ -38,7 +40,10 @@ export function errorText(e: unknown): string {
     if (e.status === 429) return `Too many requests. Try again in ${e.retryAfter ?? 60} seconds.`;
     if (e.status === 409 && e.detail === "too_many_wishlists") return "You already have 10 wishlists. Remove one first.";
     if (e.status === 422 && e.detail.startsWith("invalid_image")) return "That file isn't a photo we can read (JPEG, PNG or WebP, up to 5 MB).";
+    if (e.status === 413) return "That's too big: each photo can be up to 5 MB.";
+    if (e.status === 401 && e.detail === "bad_credentials") return "That email and password don't match the demo login.";
+    if (e.status === 401) return "Please log in again.";
     return `Something went wrong (${e.status}: ${e.detail}).`;
   }
-  return "Can't reach the ThriftRadar server. Is it running on 127.0.0.1:8000?";
+  return "Can't reach the ThriftRadar server. Is it running?";
 }

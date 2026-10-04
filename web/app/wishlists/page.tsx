@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import ListingCard from "@/components/ListingCard";
 import Notice from "@/components/Notice";
 import { apiFetch, errorText } from "@/lib/api";
+import { useConfig } from "@/lib/config";
 import type { Page, Wishlist } from "@/lib/types";
 
 function describe(w: Wishlist): string {
@@ -15,6 +16,7 @@ function describe(w: Wishlist): string {
 }
 
 export default function WishlistsPage() {
+  const demo = useConfig()?.demo ?? false;
   const [items, setItems] = useState<Wishlist[] | null>(null);
   const [open, setOpen] = useState<Wishlist | null>(null);
   const [confirming, setConfirming] = useState<number | null>(null);
@@ -41,7 +43,7 @@ export default function WishlistsPage() {
   }, [load]);
 
   async function created(w: Wishlist) {
-    setDone(`Added. ${w.matches} existing listing${w.matches === 1 ? "" : "s"} already match (you won't be notified about those). New matching posts will send a Mac notification.`);
+    setDone(`Added. ${w.matches} existing listing${w.matches === 1 ? "" : "s"} already match (you won't be notified about those). ${demo ? "New matching posts you simulate will show up here." : "New matching posts will send a Mac notification."}`);
     await load();
   }
 

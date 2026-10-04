@@ -20,7 +20,10 @@ class RepostHit:
 
 
 def find_repost_phash(conn: psycopg.Connection, *, post_id: int, sender_ref: str, ref_time: datetime,
-                      phashes: list[int], window_days: int, max_dist: int, xseller_max_dist: int) -> RepostHit | None:
+                      phashes: list[int], window_days: int, max_dist: int, xseller_max_dist: int,
+                      owner_session: str | None = None) -> RepostHit | None:
+    """`owner_session` (demo uploads): a post may only merge into listings of the same session, and a post without
+    one never merges into an upload. Otherwise a visitor could rewrite a seed listing or another visitor's."""
     if not phashes:
         return None
     row = conn.execute(
@@ -30,13 +33,14 @@ def find_repost_phash(conn: psycopg.Connection, *, post_id: int, sender_ref: str
            JOIN listing_sightings s ON s.post_id = i.post_id AND s.segment_idx = i.segment_idx
            JOIN listings l ON l.id = s.listing_id
                           AND l.last_seen_at > %(ref)s - make_interval(days => %(window)s)
+                          AND l.owner_session IS NOT DISTINCT FROM %(owner)s
            WHERE bit_count((i.phash # i_new.phash)::bit(64)) <=
                  CASE WHEN l.sender_ref = %(sender)s THEN %(max)s ELSE %(xmax)s END
            GROUP BY s.listing_id
            ORDER BY matched DESC, s.listing_id
            LIMIT 1""",
         {"ph": phashes, "post": post_id, "ref": ref_time, "window": window_days, "sender": sender_ref,
-         "max": max_dist, "xmax": xseller_max_dist},
+         "max": max_dist, "xmax": xseller_max_dist, "owner": owner_session},
     ).fetchone()
     if row is None or row[1] < math.ceil(len(phashes) / 2):
         return None
@@ -106,12 +110,14 @@ def apply_repost(conn: psycopg.Connection, hit: RepostHit, *, post_id: int, segm
 
 
 def knn_brand(conn: psycopg.Connection, post_id: int, emb: np.ndarray, k: int = 5,
-              min_cos: float = 0.92) -> tuple[str, float] | None:
+              min_cos: float = 0.92, owner_session: str | None = None) -> tuple[str, float] | None:
+    """Neighbours never include another demo session's uploads (their captions are that visitor's text)."""
     rows = conn.execute(
         """SELECT brand, 1 - (embedding <=> %(emb)s) FROM listings
            WHERE brand IS NOT NULL AND attr_sources->>'brand' = ANY(%(trusted)s) AND post_id <> %(post)s
+             AND (owner_session IS NULL OR owner_session = %(owner)s)
            ORDER BY embedding <=> %(emb)s LIMIT %(k)s""",
-        {"emb": emb, "trusted": list(TRUSTED_BRAND_SOURCES), "post": post_id, "k": k},
+        {"emb": emb, "trusted": list(TRUSTED_BRAND_SOURCES), "post": post_id, "k": k, "owner": owner_session},
     ).fetchall()
     if not rows or rows[0][1] < min_cos:
         return None

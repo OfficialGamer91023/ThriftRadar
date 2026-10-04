@@ -1,5 +1,5 @@
 """Wishlists. Spec: DESIGN.md §4.7 `POST /api/wishlists`, `GET` / `DELETE /api/wishlists/{id}`.
-Local owner is 'local'; demo sessions arrive with step 13."""
+The owner is 'local' in local mode and the session id in demo."""
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, Response
@@ -10,9 +10,10 @@ from app.api.listings_view import LISTING_COLS, listing_json
 from app.api.search import embed_photo
 from app.images import InvalidImage
 from app.matching import create_wishlist, text_wishlist_query, wishlist_filters
+from app.ratelimit import guard, ip
+from app.sessions import viewer
 
 router = APIRouter()
-OWNER = "local"
 
 
 class WishlistIn(BaseModel):
@@ -34,10 +35,10 @@ WISHLIST_SQL = """SELECT w.id, w.query_text, w.ref_image_sha, w.brand, w.max_pri
                   FROM wishlists w"""
 
 
-def _create(request: Request, *, text, emb, min_score, filters, sha=None):
+def _create(request: Request, owner: str, *, text, emb, min_score, filters, sha=None):
     try:
         with db.tx(request.app.state.pool) as conn:
-            w = create_wishlist(conn, owner=OWNER, embedding=emb, min_score=min_score, text=text,
+            w = create_wishlist(conn, owner=owner, embedding=emb, min_score=min_score, text=text,
                                 ref_image_sha=sha, filters=filters)
             row = conn.execute(WISHLIST_SQL + " WHERE w.id = %s", (w.id,)).fetchone()
     except ValueError as e:
@@ -47,6 +48,9 @@ def _create(request: Request, *, text, emb, min_score, filters, sha=None):
 
 @router.post("/api/wishlists")
 def add_wishlist(request: Request, body: WishlistIn):
+    v = viewer(request)
+    if isinstance(v, JSONResponse):
+        return v
     models = request.app.state.models
     if not models.wait_ready(timeout=30):
         return JSONResponse({"detail": "models_loading"}, 503)
@@ -55,12 +59,17 @@ def add_wishlist(request: Request, body: WishlistIn):
     to_embed, default_min = text_wishlist_query(body.text, s.match_min_text)
     emb = models.embedder.embed_text([to_embed])[0]
     min_score = body.min_score if body.min_score is not None else default_min
-    return _create(request, text=body.text, emb=emb, min_score=min_score, filters=filters)
+    return _create(request, v.owner, text=body.text, emb=emb, min_score=min_score, filters=filters)
 
 
 @router.post("/api/wishlists/image")
 async def add_image_wishlist(request: Request):
     """multipart: file (photo), optional size / max_price / brand / text fields."""
+    v = viewer(request)
+    if isinstance(v, JSONResponse):
+        return v
+    if limited := guard(request, "image_search", ip(request)):  # same detector + embedder work
+        return limited
     models = request.app.state.models
     if not models.wait_ready(timeout=30):
         return JSONResponse({"detail": "models_loading"}, 503)
@@ -82,21 +91,27 @@ async def add_image_wishlist(request: Request):
     except ValueError:
         return JSONResponse({"detail": "bad_filter"}, 422)
     filters = wishlist_filters(text, size=size, max_price=max_price, brand=form.get("brand") or None)
-    return _create(request, text=text, emb=emb, min_score=request.app.state.settings.match_min_image,
+    return _create(request, v.owner, text=text, emb=emb, min_score=request.app.state.settings.match_min_image,
                    filters=filters, sha=sha)
 
 
 @router.get("/api/wishlists")
 def list_wishlists(request: Request):
+    v = viewer(request)
+    if isinstance(v, JSONResponse):
+        return v
     with db.tx(request.app.state.pool) as conn:
-        rows = conn.execute(WISHLIST_SQL + " WHERE w.owner = %s ORDER BY w.id DESC", (OWNER,)).fetchall()
+        rows = conn.execute(WISHLIST_SQL + " WHERE w.owner = %s ORDER BY w.id DESC", (v.owner,)).fetchall()
     return {"results": [_row_json(r) for r in rows]}
 
 
 @router.get("/api/wishlists/{wishlist_id}")
 def get_wishlist(request: Request, wishlist_id: int):
+    v = viewer(request)
+    if isinstance(v, JSONResponse):
+        return v
     with db.tx(request.app.state.pool) as conn:
-        row = conn.execute(WISHLIST_SQL + " WHERE w.id = %s AND w.owner = %s", (wishlist_id, OWNER)).fetchone()
+        row = conn.execute(WISHLIST_SQL + " WHERE w.id = %s AND w.owner = %s", (wishlist_id, v.owner)).fetchone()
         if row is None:
             return JSONResponse({"detail": "not_found"}, 404)
         matches = conn.execute(
@@ -110,7 +125,10 @@ def get_wishlist(request: Request, wishlist_id: int):
 
 @router.delete("/api/wishlists/{wishlist_id}")
 def delete_wishlist(request: Request, wishlist_id: int):
+    v = viewer(request)
+    if isinstance(v, JSONResponse):
+        return v
     with db.tx(request.app.state.pool) as conn:
-        n = conn.execute("DELETE FROM wishlists WHERE id = %s AND owner = %s", (wishlist_id, OWNER)).rowcount
+        n = conn.execute("DELETE FROM wishlists WHERE id = %s AND owner = %s", (wishlist_id, v.owner)).rowcount
     return Response(status_code=204) if n else JSONResponse({"detail": "not_found"}, 404)
 

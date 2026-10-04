@@ -1,5 +1,6 @@
 """App factory. Spec: DESIGN.md §4.3 `create_app`."""
 
+import json
 import logging
 import re
 from contextlib import asynccontextmanager
@@ -10,10 +11,11 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app import db
-from app.api import health, ingest, posts, search, wishlists
-from app.media_store import LocalDirStore
+from app.api import demo_upload, health, ingest, login, posts, search, wishlists
+from app.media_store import BundledStore, CompositeStore, LocalDirStore, PgBlobStore
 from app.notify import get_notifier
 from app.pipeline.models import ModelRegistry
+from app.ratelimit import LIMITS, SlidingWindowLimiter
 from app.security import BodySizeLimitMiddleware, DemoDenylist, LocalGuard, SecurityHeaders
 from app.settings import Settings
 from app.worker import LocalCtx, Worker, make_vlm_ctx, sweep_once
@@ -67,6 +69,27 @@ def _startup_checks(settings: Settings, pool) -> None:
                 raise StartupError("demo DB contains whatsapp/chat_export posts")
 
 
+def demo_media_store(settings: Settings, pool) -> CompositeStore:
+    """Seed photos (bundled, read-only; from backend/seed once step 14 adds the manifest), then uploads in the DB."""
+    stores = []
+    manifest = Path(settings.seed_dir) / "manifest.json"
+    if manifest.is_file():
+        files = [f for p in json.loads(manifest.read_text())["posts"] for f in p["images"]]
+        stores.append(BundledStore(Path(settings.seed_dir) / "images", files))
+    stores.append(PgBlobStore(pool))
+    return CompositeStore(stores)
+
+
+def _seed_upload_limit(limiter: SlidingWindowLimiter, pool) -> None:
+    """The global daily upload cap counts today's uploads that are already in the DB."""
+    with db.tx(pool) as conn:
+        ages = [float(r[0]) for r in conn.execute(
+            """SELECT extract(epoch FROM now() - created_at) FROM posts
+               WHERE source = 'demo_upload' AND created_at > now() - interval '24 hours'""").fetchall()]
+    limiter.seed("upload_global", "all", ages)
+    log.info("upload_global seeded with %d of %d", len(ages), LIMITS["upload_global"][0])
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings()
     configure_logging()
@@ -78,28 +101,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         raise
 
     models = ModelRegistry(settings.models_dir, settings.demo_mode)
-    media_store = None if settings.demo_mode else LocalDirStore(settings.media_dir)
-    # The demo media store (bundled seed + Postgres blobs) arrives in build step 13; no worker until then.
-    notifier = get_notifier(settings)
-    worker = None
-    if media_store is not None:
-        worker = Worker(LocalCtx(pool, settings, models, media_store, notifier),
-                        make_vlm_ctx(pool, settings, media_store, notifier))
+    media_store = demo_media_store(settings, pool) if settings.demo_mode else LocalDirStore(settings.media_dir)
+    notifier = get_notifier(settings)  # NullNotifier in demo
+    worker = Worker(LocalCtx(pool, settings, models, media_store, notifier),
+                    make_vlm_ctx(pool, settings, media_store, notifier))
+    limiter = SlidingWindowLimiter()
+    if settings.demo_mode:
+        _seed_upload_limit(limiter, pool)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         if settings.load_models:
             models.load_async()
-        if worker is not None:
-            try:
-                sweep_once(pool, settings, notifier)
-            except Exception:
-                log.exception("startup sweep failed")
-            worker.start()
-        # Step 13 adds purge_demo_uploads().
+        try:
+            sweep_once(pool, settings, notifier)  # in demo this also purges uploads older than 24 h
+        except Exception:
+            log.exception("startup sweep failed")
+        worker.start()
         yield
-        if worker is not None:
-            worker.stop()
+        worker.stop()
         pool.close()
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
@@ -108,7 +128,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.models = models
     app.state.worker = worker
     app.state.notifier = notifier
-    app.state.wake = worker.wake if worker is not None else (lambda: None)
+    app.state.wake = worker.wake
+    app.state.limiter = limiter
     app.state.media_store = media_store
 
     # Middleware: the last one added runs first. Order of checks: headers wrapper → guard → body limit.
@@ -127,7 +148,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     mounted = ["health", "search", "wishlists", "posts"]
     for r in (health.router, search.router, wishlists.router, posts.router):
         app.include_router(r)
-    if not settings.demo_mode:
+    if settings.demo_mode:
+        app.include_router(login.router)
+        app.include_router(demo_upload.router)
+        mounted += ["login", "demo_upload"]
+    else:
         app.include_router(ingest.router)
         mounted.append("ingest")
     # Unknown API paths get a JSON 404 for every method, never the web app's HTML or a static-files 405.

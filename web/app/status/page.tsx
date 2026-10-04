@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Notice from "@/components/Notice";
 import { apiFetch, errorText } from "@/lib/api";
+import { useConfig } from "@/lib/config";
 import type { Status } from "@/lib/types";
 
 const QUEUE_LABEL: Record<string, string> = {
@@ -14,6 +15,7 @@ const QUEUE_LABEL: Record<string, string> = {
 };
 
 export default function StatusPage() {
+  const demo = useConfig()?.demo ?? false;
   const [s, setS] = useState<Status | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -81,19 +83,21 @@ export default function StatusPage() {
         </div>
 
         <div className="panel">
-          <h2>This Mac</h2>
+          <h2>{demo ? "Server" : "This Mac"}</h2>
           <div className="row" style={{ justifyContent: "space-between" }}>
             <span>On-device models</span>
             <span className={`pill ${s.models_ready ? "ok" : "warn"}`}>{s.models_ready ? "ready" : "loading"}</span>
           </div>
           <div className="row" style={{ justifyContent: "space-between" }}>
-            <span>Active wishlists</span>
+            <span>{demo ? "Your active wishlists" : "Active wishlists"}</span>
             <span className="mono">{s.wishlists}</span>
           </div>
-          <div className="row" style={{ justifyContent: "space-between" }}>
-            <span>WhatsApp listener</span>
-            <span className="pill warn">not set up yet</span>
-          </div>
+          {!demo && (
+            <div className="row" style={{ justifyContent: "space-between" }}>
+              <span>WhatsApp listener</span>
+              <span className="pill warn">not set up yet</span>
+            </div>
+          )}
         </div>
       </div>
     </div>

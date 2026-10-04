@@ -20,7 +20,7 @@ def test_demo_mode_only_exact_one(monkeypatch, raw, expected):
 def test_demo_defaults_and_overrides(monkeypatch):
     monkeypatch.setenv("DEMO_MODE", "1")
     s = Settings()
-    assert s.vlm_daily_cap == 100 and s.worker_poll_s == 0 and s.vlm_provider == "openrouter"
+    assert s.vlm_daily_cap == 100 and s.worker_poll_s == 2 and s.vlm_provider == "openrouter"
     monkeypatch.setenv("VLM_DAILY_CAP", "7")
     monkeypatch.setenv("NOTIFY_MACOS", "1")
     s = Settings()

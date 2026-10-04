@@ -14,6 +14,8 @@ export default function ListingCard({ l }: { l: Listing }) {
         <span className={`size${l.size_label ? "" : " muted"}`}>{sizeText(l)}</span>
         <span className="meta">
           <span>{ago(l.last_seen_at)}</span>
+          {l.source === "demo_seed" && <span className="badge">demo listing</span>}
+          {l.source === "demo_upload" && <span className="badge ai">your upload</span>}
           {l.repost_count > 0 && <span className="badge repost">posted {l.repost_count + 1}×</span>}
           {l.colour && <span>{l.colour}</span>}
         </span>

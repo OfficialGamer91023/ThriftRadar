@@ -327,3 +327,18 @@ def test_an_upload_never_rewrites_a_seed_or_another_sessions_listing(demo, demo_
     with psycopg.connect(demo_db_url) as c:
         assert c.execute("SELECT count(*), max(repost_count) FROM listings WHERE source = 'demo_upload'"
                          ).fetchone() == (2, 1)
+
+
+def test_credits_are_public(demo):
+    _, client = demo  # no login
+    body = client.get("/api/credits").json()
+    assert body["results"] == []  # the fixture points seed_dir at an empty dir
+
+
+def test_credits_list_the_real_seed(demo_db_url, tmp_path):
+    from scripts.seed_demo import SEED_DIR
+
+    app = create_app(demo_settings(demo_db_url, tmp_path, seed_dir=str(SEED_DIR)))
+    with TestClient(app, base_url=HTTPS) as c:
+        rows = c.get("/api/credits").json()["results"]
+    assert len(rows) >= 40 and all(r["author"] and r["license"].startswith("CC") for r in rows)

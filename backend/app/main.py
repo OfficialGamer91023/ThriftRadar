@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app import db
-from app.api import demo_upload, health, ingest, login, posts, search, wishlists
+from app.api import credits, demo_upload, health, ingest, login, posts, search, wishlists
 from app.media_store import BundledStore, CompositeStore, LocalDirStore, PgBlobStore
 from app.notify import get_notifier
 from app.pipeline.models import ModelRegistry
@@ -145,8 +145,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.add_middleware(LocalGuard, ingest_token=settings.ingest_token)
     app.add_middleware(SecurityHeaders)
 
-    mounted = ["health", "search", "wishlists", "posts"]
-    for r in (health.router, search.router, wishlists.router, posts.router):
+    mounted = ["health", "search", "wishlists", "posts", "credits"]
+    for r in (health.router, search.router, wishlists.router, posts.router, credits.router):
         app.include_router(r)
     if settings.demo_mode:
         app.include_router(login.router)

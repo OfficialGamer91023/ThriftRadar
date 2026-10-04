@@ -47,8 +47,28 @@ def test_search_text_with_filters_from_the_query(env):
     assert body["filters"] == {"brand": "Nike", "max_price": 5000, "size_eu": 42.0}
     assert [x["brand"] for x in body["results"]] == ["Nike"]
     hit = body["results"][0]
-    assert hit["cover"].startswith("/media/") and "score" in hit and hit["size_label"] == "EU 42"
+    assert hit["cover"].startswith("/media/") and hit["size_label"] == "EU 42"
+    assert body["order"] == "newest" and "score" not in hit  # only filters: no similarity to rank by
     assert len(client.get("/api/search", params={"q": "shoes"}).json()["results"]) == 3
+
+
+def test_search_with_descriptive_words_ranks_by_similarity(env):
+    client, _ = env
+    body = client.get("/api/search", params={"q": "white sneakers"}).json()
+    assert body["order"] == "similar" and all("score" in r for r in body["results"])
+
+
+def test_size_only_search_and_exact_sizes_first(env, db_url):
+    client, _ = env
+    with psycopg.connect(db_url) as c:  # one AI-read size within the slack, one unknown size
+        c.execute("""UPDATE listings SET size_eu = 41, size_label = 'EU 41', attr_sources = attr_sources || '{"size":"vlm"}'
+                     WHERE brand = 'Nike'""")
+        c.execute("UPDATE listings SET size_eu = NULL, size_label = NULL WHERE brand = 'Adidas'")
+        c.commit()
+    body = client.get("/api/search", params={"size": 40}).json()
+    assert body["filters"]["size_eu"] == 40.0 and body["order"] == "newest"
+    assert [r["brand"] for r in body["results"]] == ["Vans", "Nike", "Adidas"]  # exact, AI-near, unknown
+    assert client.get("/api/search").status_code == 400  # nothing to search for
 
 
 def test_search_needs_models(env):

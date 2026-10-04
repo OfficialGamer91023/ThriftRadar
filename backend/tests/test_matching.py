@@ -203,3 +203,19 @@ def test_sweep_unmatched_and_retry_unnotified(conn, pool):
                                         ("max 6000", 6000), ("price 4000", 4000), ("white sneakers", None)])
 def test_budget_phrases(text, price):
     assert wishlist_filters(text)["max_price"] == price
+
+
+@pytest.mark.parametrize("q,expect", [
+    ("eu 40", None), ("nike", None), ("nike size 42 under 5000", None), ("40", None), ("shoes size 41", None),
+    ("white nike air force size 42", "white air force"), ("adidas samba rs 4500", "samba"),
+    ("black boots uk 8", "black boots"), ("red jordan 1", "red 1"), ("new balance 550", None),
+])
+def test_semantic_text(q, expect):
+    from app.matching import semantic_text
+    assert semantic_text(q) == expect
+
+
+def test_filters_only_wishlist_skips_the_score_gate():
+    from app.matching import FILTERS_ONLY_MIN_SCORE, text_wishlist_query
+    assert text_wishlist_query("nike size 42", 0.08) == ("nike size 42", FILTERS_ONLY_MIN_SCORE)
+    assert text_wishlist_query("white nike size 42", 0.08) == ("white", 0.08)

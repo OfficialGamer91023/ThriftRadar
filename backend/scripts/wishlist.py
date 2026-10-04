@@ -17,7 +17,7 @@ from pathlib import Path
 import psycopg
 from pgvector.psycopg import register_vector
 
-from app.matching import create_wishlist, wishlist_filters
+from app.matching import create_wishlist, text_wishlist_query, wishlist_filters
 from app.notify import get_notifier
 from app.settings import Settings
 
@@ -52,9 +52,10 @@ def cmd_add(args, settings: Settings) -> int:
     else:
         from app.pipeline.embed import Embedder
 
-        emb = Embedder(Path(settings.models_dir) / "siglip").embed_text([args.text])[0]
+        to_embed, default_min = text_wishlist_query(args.text, settings.match_min_text)
+        emb = Embedder(Path(settings.models_dir) / "siglip").embed_text([to_embed])[0]
         sha = None
-        min_score = args.min_score if args.min_score is not None else settings.match_min_text
+        min_score = args.min_score if args.min_score is not None else default_min
     filters = wishlist_filters(args.text, size=args.size, max_price=args.max_price, brand=args.brand)
     with psycopg.connect(settings.database_url) as conn:
         register_vector(conn)

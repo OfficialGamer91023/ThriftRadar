@@ -30,6 +30,6 @@ def listing_json(row) -> dict:
     out["first_seen_at"] = d["first_seen_at"].isoformat()
     out["last_seen_at"] = d["last_seen_at"].isoformat()
     out["cover"] = media_url(d["cover_sha"])
-    if len(row) > len(_NAMES):
+    if len(row) > len(_NAMES) and row[len(_NAMES)] is not None:
         out["score"] = round(float(row[len(_NAMES)]), 4)
     return out

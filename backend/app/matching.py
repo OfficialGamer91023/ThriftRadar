@@ -7,7 +7,7 @@ from decimal import Decimal
 import numpy as np
 import psycopg
 
-from app.pipeline.caption import normalize, parse_caption, to_size_eu
+from app.pipeline.caption import _BRAND_RX, normalize, parse_caption, to_size_eu
 
 # Sub-brands match their parent: a Nike wishlist should see Jordans.
 BRAND_FAMILY = {"jordan": "nike", "yeezy": "adidas"}
@@ -64,6 +64,28 @@ def match_wishlist(conn: psycopg.Connection, wishlist_id: int) -> list[int]:
             ON CONFLICT (wishlist_id, listing_id) DO NOTHING RETURNING id""", (wishlist_id,)).fetchall()]
 
 
+_SIZE_PHRASE = re.compile(r"\b(?:size|sz|eur|eu|uk|us|cm)\s*[:\-]?\s*\d{1,2}(?:\.5)?(?:\s*[-/–]\s*\d{1,2}(?:\.5)?)?\b"
+                          r"|\b\d{2}(?:\.5)?\s*(?:eur|eu|cm)\b")
+_PRICE_PHRASE = re.compile(r"\b(?:rs\.?|pkr|price|demand|final|now)\s*[:=\-]?\s*\d[\d,]*(?:\.\d+)?\s*k?\b"
+                           r"|\b\d[\d,]*\s*(?:/-|rs|pkr)\b|\b\d+(?:\.\d)?\s*k\b")
+_FILLER = frozenset("shoe shoes pair pairs size sz for the a an in of with and any some under below max upto up to "
+                    "budget within less than rs pkr price eu uk us cm".split())
+
+
+def semantic_text(q: str | None) -> str | None:
+    """Pure. What's left of a query once brand, size, price and filler words are taken out, or None.
+    "nike eu 42 under 5000" -> None (filters only); "white nike air force size 42" -> "white air force"."""
+    if not q:
+        return None
+    t = _BUDGET.sub(" ", normalize(q))
+    t = _SIZE_PHRASE.sub(" ", t)
+    t = _PRICE_PHRASE.sub(" ", t)
+    for rx, _ in _BRAND_RX:
+        t = rx.sub(" ", t)
+    words = [w for w in re.findall(r"[a-z0-9]+", t) if w not in _FILLER]
+    return " ".join(words) if any(any(c.isalpha() for c in w) for w in words) else None
+
+
 def wishlist_filters(text: str | None, *, size: float | None = None, max_price: int | None = None,
                      brand: str | None = None) -> dict:
     """Pure. Explicit values win; the rest comes from the text ("nike size 42 under 5000")."""
@@ -81,6 +103,15 @@ def wishlist_filters(text: str | None, *, size: float | None = None, max_price: 
     if max_price is None and f and f.price is not None and not f.price_ambiguous:
         max_price = f.price
     return {"brand": brand, "size_eu_min": size_min, "size_eu_max": size_max, "max_price": max_price}
+
+
+FILTERS_ONLY_MIN_SCORE = -1.0  # a wishlist with no descriptive words matches on its filters alone
+
+
+def text_wishlist_query(text: str, default_min_score: float) -> tuple[str, float]:
+    """-> (text to embed, min_score). "nike size 42" has nothing to compare by look, so the score gate is off."""
+    semantic = semantic_text(text)
+    return (semantic, default_min_score) if semantic else (text, FILTERS_ONLY_MIN_SCORE)
 
 
 @dataclass(frozen=True)

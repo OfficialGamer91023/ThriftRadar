@@ -9,7 +9,7 @@ from app import db
 from app.api.listings_view import LISTING_COLS, listing_json
 from app.api.search import embed_photo
 from app.images import InvalidImage
-from app.matching import create_wishlist, wishlist_filters
+from app.matching import create_wishlist, text_wishlist_query, wishlist_filters
 
 router = APIRouter()
 OWNER = "local"
@@ -52,8 +52,10 @@ def add_wishlist(request: Request, body: WishlistIn):
         return JSONResponse({"detail": "models_loading"}, 503)
     s = request.app.state.settings
     filters = wishlist_filters(body.text, size=body.size, max_price=body.max_price, brand=body.brand)
-    emb = models.embedder.embed_text([body.text])[0]
-    return _create(request, text=body.text, emb=emb, min_score=body.min_score or s.match_min_text, filters=filters)
+    to_embed, default_min = text_wishlist_query(body.text, s.match_min_text)
+    emb = models.embedder.embed_text([to_embed])[0]
+    min_score = body.min_score if body.min_score is not None else default_min
+    return _create(request, text=body.text, emb=emb, min_score=min_score, filters=filters)
 
 
 @router.post("/api/wishlists/image")

@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app import db
@@ -129,6 +130,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     if not settings.demo_mode:
         app.include_router(ingest.router)
         mounted.append("ingest")
+    # Unknown API paths get a JSON 404 for every method, never the web app's HTML or a static-files 405.
+    @app.api_route("/api/{rest:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"], include_in_schema=False)
+    def api_not_found(rest: str):
+        return JSONResponse({"detail": "not_found"}, 404)
+
     if WEB_OUT.is_dir():
         app.mount("/", StaticFiles(directory=WEB_OUT, html=True), name="web")
         mounted.append("web")

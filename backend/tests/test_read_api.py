@@ -1,10 +1,12 @@
 """Search, listings, media, wishlists and status APIs (local mode, fake models). Spec: DESIGN.md §4.7."""
 
+import numpy as np
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
 from app import db
+from app.api.search import embed_photo
 from app.main import create_app
 from app.media_store import LocalDirStore
 from app.settings import Settings
@@ -124,6 +126,25 @@ def test_image_wishlist(env):
     r = client.post("/api/wishlists/image", files={"file": ("a.jpg", encode(pattern(31)), "image/jpeg")},
                     data={"size": "43"}, headers=H)
     assert r.status_code == 201 and r.json()["image"] and r.json()["size_eu"] == 43.0
+    assert r.json()["min_score"] == pytest.approx(0.68) and r.json()["brand_from_photo"] is False  # no brand model
+
+
+def test_image_wishlist_takes_a_confident_brand_from_the_photo(env):
+    client, models = env
+    photo = encode(pattern(40))
+    emb, _, _ = embed_photo(models, photo)
+    other = np.zeros_like(emb)
+    other[int(np.argmin(np.abs(emb)))] = 1.0  # ~orthogonal to the photo
+    models.brand_text, models.brand_names = np.stack([emb, other]), ["Adidas", "Vans"]
+    client.app.state.settings.match_min_image = -1.0  # fake embeddings: let the brand filter alone decide
+    w = client.post("/api/wishlists/image", files={"file": ("a.jpg", photo, "image/jpeg")}, headers=H).json()
+    assert (w["brand"], w["brand_from_photo"]) == ("Adidas", True)
+    detail = client.get(f"/api/wishlists/{w['id']}").json()
+    assert detail["results"] and {x["brand"] for x in detail["results"]} == {"Adidas"}
+    # a brand the user gave wins over the photo
+    w2 = client.post("/api/wishlists/image", files={"file": ("a.jpg", photo, "image/jpeg")},
+                     data={"brand": "Nike"}, headers=H).json()
+    assert (w2["brand"], w2["brand_from_photo"]) == ("Nike", False)
 
 
 def test_status(env):

@@ -8,7 +8,7 @@ import pytest
 from PIL import Image, ImageDraw
 
 from app.pipeline.detect import Det, primary_box
-from app.pipeline.embed import l2_normalize, segment_embedding
+from app.pipeline.embed import l2_normalize, segment_embedding, zero_shot_brand
 from app.pipeline.ocr import parse_size_tag
 
 MODELS_DIR = Path(__file__).resolve().parents[2] / "data" / "models"
@@ -38,6 +38,16 @@ def test_segment_embedding_is_normalized_mean():
     v = l2_normalize(np.array([[1.0, 0, 0], [0, 1.0, 0]], dtype=np.float32))
     out = segment_embedding(v)
     assert np.allclose(out, [2 ** -0.5, 2 ** -0.5, 0]) and np.isclose(np.linalg.norm(out), 1)
+
+
+def test_zero_shot_brand_needs_both_the_floor_and_the_margin():
+    emb = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+    names = ["Converse", "Vans", "Nike"]
+    bt = lambda *top: np.array([[c, 0, 0] for c in top], dtype=np.float32)
+    assert zero_shot_brand(bt(0.12, 0.07, 0.01), names, emb, 0.08, 0.03) == "Converse"
+    assert zero_shot_brand(bt(0.12, 0.10, 0.01), names, emb, 0.08, 0.03) is None  # runner-up too close
+    assert zero_shot_brand(bt(0.07, 0.01, 0.00), names, emb, 0.08, 0.03) is None  # below the floor
+    assert zero_shot_brand(None, [], emb, 0.08, 0.03) is None
 
 
 @pytest.mark.parametrize("lines,expected", [

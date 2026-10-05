@@ -73,7 +73,7 @@ class Settings(BaseSettings):
 
     notify_macos: bool = True
     match_min_text: float = 0.08  # calibrated 2026-10-03 (DESIGN §4.6)
-    match_min_image: float = 0.80
+    match_min_image: float = 0.68  # photo wishlists; recalibrated 2026-10-05 (DESIGN §4.6)
     trust_proxy_hops: int = 0
     default_currency: str = ""
 

@@ -39,7 +39,7 @@ from app.pipeline.budget import (
 from app.pipeline.caption import CaptionFields, parse_caption, to_size_eu
 from app.pipeline.decide import Decision, SegFlags, needs_vlm
 from app.pipeline.detect import Det, primary_box
-from app.pipeline.embed import segment_embedding
+from app.pipeline.embed import segment_embedding, zero_shot_brand
 from app.pipeline.merge import merge_attributes
 from app.pipeline.ocr import MIN_CONF, parse_size_tag
 from app.pipeline.repost import RepostHit, apply_repost, find_repost_embedding, find_repost_phash, knn_brand
@@ -250,16 +250,8 @@ def _run_ocr(ctx: LocalCtx, plan: SegPlan) -> None:
 
 
 def _zero_shot_brand(ctx: LocalCtx, emb: np.ndarray) -> str | None:
-    bt = ctx.models.brand_text
-    if bt is None or not len(ctx.models.brand_names):
-        return None
-    scores = bt @ emb
-    order = np.argsort(scores)[::-1]
-    top = float(scores[order[0]])
-    second = float(scores[order[1]]) if len(order) > 1 else -1.0
-    if top >= ctx.settings.siglip_brand_min_cos and top - second >= ctx.settings.siglip_brand_margin:
-        return ctx.models.brand_names[int(order[0])]
-    return None
+    return zero_shot_brand(ctx.models.brand_text, ctx.models.brand_names, emb,
+                           ctx.settings.siglip_brand_min_cos, ctx.settings.siglip_brand_margin)
 
 
 def process_local(ctx: LocalCtx, post: PostRow) -> str | None:

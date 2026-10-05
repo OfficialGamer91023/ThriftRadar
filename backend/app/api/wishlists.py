@@ -9,6 +9,7 @@ from app import db
 from app.api.listings_view import LISTING_COLS, listing_json
 from app.api.search import embed_photo
 from app.images import InvalidImage
+from app.pipeline.embed import zero_shot_brand
 from app.matching import create_wishlist, text_wishlist_query, wishlist_filters
 from app.ratelimit import guard, ip
 from app.sessions import viewer
@@ -35,7 +36,7 @@ WISHLIST_SQL = """SELECT w.id, w.query_text, w.ref_image_sha, w.brand, w.max_pri
                   FROM wishlists w"""
 
 
-def _create(request: Request, owner: str, *, text, emb, min_score, filters, sha=None):
+def _create(request: Request, owner: str, *, text, emb, min_score, filters, sha=None, extra=None):
     try:
         with db.tx(request.app.state.pool) as conn:
             w = create_wishlist(conn, owner=owner, embedding=emb, min_score=min_score, text=text,
@@ -43,7 +44,7 @@ def _create(request: Request, owner: str, *, text, emb, min_score, filters, sha=
             row = conn.execute(WISHLIST_SQL + " WHERE w.id = %s", (w.id,)).fetchone()
     except ValueError as e:
         return JSONResponse({"detail": str(e)}, 409)
-    return JSONResponse(_row_json(row), 201)
+    return JSONResponse({**_row_json(row), **(extra or {})}, 201)
 
 
 @router.post("/api/wishlists")
@@ -90,9 +91,16 @@ async def add_image_wishlist(request: Request):
         max_price = int(form["max_price"]) if form.get("max_price") else None
     except ValueError:
         return JSONResponse({"detail": "bad_filter"}, 422)
+    s = request.app.state.settings
     filters = wishlist_filters(text, size=size, max_price=max_price, brand=form.get("brand") or None)
-    return _create(request, v.owner, text=text, emb=emb, min_score=request.app.state.settings.match_min_image,
-                   filters=filters, sha=sha)
+    # a photo from a shop or a catalogue scores lower against listings than listings do against each other, so
+    # the look gate is looser (DESIGN §4.6) and the brand, read from the photo when confident, keeps it precise
+    from_photo = False
+    if not filters["brand"] and (brand := zero_shot_brand(models.brand_text, models.brand_names, emb,
+                                                          s.siglip_brand_min_cos, s.siglip_brand_margin)):
+        filters["brand"], from_photo = brand, True
+    return _create(request, v.owner, text=text, emb=emb, min_score=s.match_min_image, filters=filters, sha=sha,
+                   extra={"brand_from_photo": from_photo})
 
 
 @router.get("/api/wishlists")

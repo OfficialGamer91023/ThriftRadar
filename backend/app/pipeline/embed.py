@@ -20,6 +20,21 @@ def segment_embedding(vecs: np.ndarray) -> np.ndarray:
     return l2_normalize(np.asarray(vecs, dtype=np.float32).mean(axis=0))
 
 
+def zero_shot_brand(brand_text: np.ndarray | None, brand_names: list[str], emb: np.ndarray,
+                    min_cos: float, margin: float) -> str | None:
+    """The brand whose text embedding is closest to `emb`, if it clears `min_cos` and beats the runner-up by
+    `margin` (calibrated 2026-10-03: 92% precision on text-labelled listings); else None."""
+    if brand_text is None or not len(brand_names):
+        return None
+    scores = brand_text @ emb
+    order = np.argsort(scores)[::-1]
+    top = float(scores[order[0]])
+    second = float(scores[order[1]]) if len(order) > 1 else -1.0
+    if top >= min_cos and top - second >= margin:
+        return brand_names[int(order[0])]
+    return None
+
+
 def _features(out):
     # transformers may return a tensor or a ModelOutput depending on version
     return out if hasattr(out, "detach") else out.pooler_output

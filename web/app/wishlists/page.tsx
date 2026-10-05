@@ -43,7 +43,8 @@ export default function WishlistsPage() {
   }, [load]);
 
   async function created(w: Wishlist) {
-    setDone(`Added. ${w.matches} existing listing${w.matches === 1 ? "" : "s"} already match (you won't be notified about those). ${demo ? "New matching posts you simulate will show up here." : "New matching posts will send a Mac notification."}`);
+    const fromPhoto = w.brand_from_photo ? `Brand read from the photo: ${w.brand}, so only ${w.brand} listings will match. ` : "";
+    setDone(`Added. ${fromPhoto}${w.matches} existing listing${w.matches === 1 ? "" : "s"} already match (you won't be notified about those). ${demo ? "New matching posts you simulate will show up here." : "New matching posts will send a Mac notification."}`);
     await load();
   }
 

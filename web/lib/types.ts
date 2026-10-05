@@ -55,6 +55,7 @@ export interface Wishlist {
   active: boolean;
   created_at: string;
   matches: number;
+  brand_from_photo?: boolean; // only on a photo wishlist's create response
   results?: Listing[];
 }
 

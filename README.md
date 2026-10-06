@@ -4,7 +4,7 @@ Turns a WhatsApp thrift group's shoe posts into a searchable catalogue, and tell
 
 ## Why I built this
 
-I was in a WhatsApp group that posted hundreds of thrifted shoes a day. Every so often a really cool pair showed up, and I'd miss it because I didn't check the group regularly. By the time I scrolled back, it was buried under everything posted since, or already sold.
+I was in a WhatsApp group that posted dozens of thrifted shoes every day. Every so often a really cool pair showed up, and I'd miss it because I didn't check the group regularly. By the time I scrolled back, it was buried under everything posted since, or already sold.
 
 Scrolling doesn't scale: sellers post photo albums with loose captions ("AF1 43 Rs 4500 final"), repost the same pairs for weeks, and the one you want sits somewhere in the middle. So I built something that watches the group for me. ThriftRadar listens to one group as a read-only linked device, finds the shoe in each photo, reads the caption and the size tag, fills the gaps with a vision-language model only when it has to, spots reposts, and matches every new listing against your wishlists. A match pops up as a macOS notification.
 

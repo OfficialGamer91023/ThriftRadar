@@ -24,3 +24,6 @@ __pycache__/
 .DS_Store
 *.tsbuildinfo
 dist/
+
+# private design notes and progress log (real group details)
+docs/

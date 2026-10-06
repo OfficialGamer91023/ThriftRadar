@@ -22,48 +22,34 @@ It runs on your own Mac. A separate demo mode, with licensed sample photos and n
 ## How it works
 
 ```mermaid
-flowchart LR
-  subgraph WA["WhatsApp thrift group"]
-    S["Sellers post photo albums + captions"]
+flowchart TD
+  WA(["WhatsApp thrift group<br/>sellers post photo albums + captions"])
+
+  subgraph L["Listener · Node.js + Baileys · read-only linked device"]
+    direction LR
+    F["Filter<br/>one group, before any download"] --> A["Album grouping<br/>per seller, 60 s window"] --> SP["Disk spool<br/>survives crashes"]
   end
 
-  subgraph L["Listener (Node.js, Baileys): read-only linked device"]
-    F["Filter: one group, images/text only, before any download"]
-    A["Album grouping: per seller, 60 s sliding window, 180 s cap"]
-    SP["Disk spool (crash-safe)"]
-    F --> A --> SP
-  end
-
-  S --> F
-  SP -- "POST /ingest + Idempotency-Key" --> I
-
-  subgraph B["Backend (FastAPI, single process)"]
-    I["/ingest: validate + store, no inference"]
-    Q[("posts table = job queue<br/>FOR UPDATE SKIP LOCKED leases")]
-    I --> Q
-
-    subgraph P["AI pipeline: cheapest step first"]
-      P1["Caption parser: price, size, brand"]
-      P2["pHash repost check"]
-      P3["YOLO-World: find & crop the shoe"]
-      P4["SigLIP embedding + vector repost check"]
-      P5["RapidOCR: size/brand from tags, only if missing"]
-      P6["Vision-language model: only if still unsure<br/>daily cap + cost ledger"]
-      P1 --> P2 --> P3 --> P4 --> P5 --> P6
+  subgraph B["Backend · FastAPI · one process"]
+    I["/ingest<br/>validate + store, no AI yet"] --> Q[("Job queue<br/>the posts table")]
+    Q --> P
+    subgraph P["AI pipeline · cheapest step first, stops once it knows enough"]
+      direction TB
+      P1["1 · Caption parser: price, size, brand"] --> P2["2 · pHash: is this a repost?"]
+      P2 --> P3["3 · YOLO-World: find and crop the shoe"]
+      P3 --> P4["4 · SigLIP: embedding, brand, repost check"]
+      P4 --> P5["5 · RapidOCR: size tag, only if still missing"]
+      P5 --> P6["6 · Vision-language model: only if still unsure, capped per day"]
     end
-
-    Q --> P1
-    M["Wishlist matching<br/>(filters + image similarity)"]
-    P6 --> M
-    P4 --> M
+    P --> M["Wishlist matching<br/>filters + image similarity"]
   end
 
-  DB[("PostgreSQL 16 + pgvector")]
-  P4 <--> DB
-  M <--> DB
-  M --> N["macOS notification"]
-
-  W["Web app (Next.js static export)"] -- "REST API" --> B
+  WA --> L
+  L -- "POST /ingest" --> I
+  P <--> DB[("PostgreSQL 16 + pgvector")]
+  M --> N(["macOS notification:<br/>your size, under budget, just posted"])
+  U(["You"]) --> W["Web app · Next.js<br/>search by text or photo, wishlists, repost history"]
+  W -- "REST API" --> B
 ```
 
 - **`listener/`** (Node ≥ 20, [Baileys](https://github.com/WhiskeySockets/Baileys)): a linked device that processes exactly one group. It never sends messages or read receipts and doesn't appear online. Messages are filtered before any media download; photos and captions from the same sender are grouped into albums, spooled to disk, and posted to the loopback-only `/ingest` with an idempotency key.

@@ -194,3 +194,7 @@ deploy/      launchd agents (macOS), demo Docker image, Oracle VM setup
 ## Photo credits
 
 The demo seed photos are by their respective authors on Flickr and rawpixel, used under CC BY 2.0, CC BY-SA 2.0 and CC0. Each file's author, source, license and checksum are listed in [`backend/seed/ATTRIBUTION.csv`](backend/seed/ATTRIBUTION.csv).
+
+## License
+
+The code is released under the [MIT License](LICENSE). The photos in `backend/seed/images/` are not covered by it: each keeps its own Creative Commons license, listed in `ATTRIBUTION.csv`.
